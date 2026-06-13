@@ -272,33 +272,121 @@ export function App() {
       pushCompleted({ id: nextId(), role: "user", content: input });
 
       switch (command) {
-        case "/help":
+                case "/help":
           pushNotice(
             [
               "Commands:",
               "  /help              Show this list",
               "  /model [name]      Switch model or list all",
               "  /clear             Clear conversation",
-              "  /tokens            Show token count",
+              "  /tokens            Show token usage breakdown",
+              "  /add [path]        Add file to context (no path = list files)",
+              "  /remove <path>     Remove file from context",
+              "  /context           Show context window summary",
               "  /exit              Quit",
+              "",
+              "Tips:",
+              "  @filename          Mention a file — adds it to context automatically",
+              "  Ctrl+C             Exit",
             ].join("\n")
           );
           return true;
 
         case "/clear":
           conversationRef.current.clear();
+          contextManagerRef.current.clearFiles();
           setCompletedMessages([]);
           setTokenCount(0);
-          pushNotice("Conversation cleared.");
+          pushNotice("Conversation and context cleared.");
           return true;
 
-        case "/tokens": {
-          const t = conversationRef.current.getTotalTokens();
-          pushNotice(
-            `Tokens: ${formatTokenCount(t)} / ${formatTokenCount(
-              TOKEN_LIMITS[currentProvider]
-            )}`
-          );
+                case "/tokens": {
+          const historyTokens = conversationRef.current.getHistoryTokens();
+          const summary = contextManagerRef.current.getSummary(historyTokens);
+          const lines = [
+            `Context: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens (${summary.percent.toFixed(1)}%)`,
+            `  History : ${formatTokenCount(summary.historyTokens)} tokens`,
+            `  Files   : ${formatTokenCount(summary.fileTokens)} tokens (${summary.fileCount} file${summary.fileCount !== 1 ? "s" : ""})`,
+          ];
+          if (summary.files.length > 0) {
+            lines.push("  In context:");
+            summary.files.forEach((f) => lines.push(`    • ${f}`));
+          }
+          pushNotice(lines.join("\n"));
+          return true;
+        }
+
+        case "/add": {
+          const filePath = args[0];
+          if (!filePath) {
+            // Show currently loaded files
+            const files = contextManagerRef.current.getFiles();
+            if (files.length === 0) {
+              pushNotice("No files in context. Use /add <path> to add one.");
+            } else {
+              const lines = ["Files in context:"];
+              files.forEach((f) =>
+                lines.push(
+                  `  • ${f.filePath} (${formatTokenCount(f.tokens)} tokens, via ${f.source})`
+                )
+              );
+              pushNotice(lines.join("\n"));
+            }
+            return true;
+          }
+          const result = contextManagerRef.current.addFile(filePath, "command");
+          if (result.success) {
+            pushNotice(
+              `Added to context: ${filePath}\n` +
+              `  ${formatTokenCount(result.tokens ?? 0)} tokens, ${result.lines} lines`
+            );
+          } else {
+            pushCompleted({
+              id: nextId(),
+              role: "error",
+              content: `Failed to add file: ${result.error}`,
+            });
+          }
+          return true;
+        }
+
+        case "/remove": {
+          const filePath = args[0];
+          if (!filePath) {
+            pushNotice("Usage: /remove <path>");
+            return true;
+          }
+          const removed = contextManagerRef.current.removeFile(filePath);
+          if (removed) {
+            pushNotice(`Removed from context: ${filePath}`);
+          } else {
+            pushNotice(`File not in context: ${filePath}`);
+          }
+          return true;
+        }
+
+        case "/context": {
+          // Alias for /add with no args — shows context summary
+          const files = contextManagerRef.current.getFiles();
+          const historyTokens = conversationRef.current.getHistoryTokens();
+          const summary = contextManagerRef.current.getSummary(historyTokens);
+          if (files.length === 0) {
+            pushNotice(
+              `Context window: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens\n` +
+              `No files loaded. Use /add <path> or @filename to add files.`
+            );
+          } else {
+            const lines = [
+              `Context window: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens (${summary.percent.toFixed(1)}%)`,
+              "Files:",
+            ];
+            files.forEach((f) =>
+              lines.push(
+                `  • ${f.filePath}  ${formatTokenCount(f.tokens)} tokens`
+              )
+            );
+            pushNotice(lines.join("\n"));
+          }
           return true;
         }
 
@@ -324,6 +412,8 @@ export function App() {
           if (match) {
             setCurrentProvider(match.provider);
             setCurrentModel(match.model);
+            // Update context manager so token limits reflect new provider
+            contextManagerRef.current.setProvider(match.provider);
             pushNotice(`Switched to ${match.model} (${match.provider})`);
           } else {
             setCurrentModel(modelArg);
@@ -354,9 +444,49 @@ export function App() {
       if (handleSlashCommand(trimmed)) return;
 
       pushCompleted({ id: nextId(), role: "user", content: trimmed });
+
+      // ── Auto-add @mentioned files to context ─────────────────
+      // Extract all @mentions from user input and load them into
+      // the ContextManager if not already loaded.
+      const mentionRegex = /@([\w.\/\-]+)/g;
+      let mentionMatch;
+      const mentionNotices: string[] = [];
+
+      while ((mentionMatch = mentionRegex.exec(trimmed)) !== null) {
+        const mentionedPath = mentionMatch[1];
+        if (!contextManagerRef.current.hasFile(mentionedPath)) {
+          const result = contextManagerRef.current.addFile(
+            mentionedPath,
+            "mention"
+          );
+          if (result.success) {
+            mentionNotices.push(
+              `Added to context: ${mentionedPath} (${formatTokenCount(result.tokens ?? 0)} tokens)`
+            );
+          }
+          // Silent fail on mention — don't block the message if file not found
+        }
+      }
+
+      if (mentionNotices.length > 0) {
+        pushNotice(mentionNotices.join("\n"));
+      }
+
       conversationRef.current.addUserMessage(trimmed);
 
       setIsLoading(true);
+
+      // ── Warn user if approaching context limit ────────────────
+      const preRunHistory = conversationRef.current.getHistoryTokens();
+      const preRunSummary = contextManagerRef.current.getSummary(preRunHistory);
+      if (preRunSummary.percent >= 70 && preRunSummary.percent < 85) {
+        pushNotice(
+          `⚠ Context at ${preRunSummary.percent.toFixed(0)}% ` +
+          `(${formatTokenCount(preRunSummary.used)} / ${formatTokenCount(preRunSummary.total)} tokens). ` +
+          `Older messages will be trimmed soon.`
+        );
+      }
+
       streamBufferRef.current = "";
       fullResponseRef.current = "";
       isFirstChunkRef.current = true;
@@ -374,7 +504,7 @@ export function App() {
           provider: currentProvider,
           model: currentModel,
           conversation: conversationRef.current,
-
+          contextManager: contextManagerRef.current,
           onToken: (token) => {
             fullResponseRef.current += token;
             streamBufferRef.current += token;
@@ -543,7 +673,10 @@ export function App() {
 
         flushAll();
         conversationRef.current.addAssistantMessage(fullResponseRef.current);
-        setTokenCount(conversationRef.current.getTotalTokens());
+        // Token count now includes file context tokens for accurate display
+        const histTokens = conversationRef.current.getHistoryTokens();
+        const summary = contextManagerRef.current.getSummary(histTokens);
+        setTokenCount(summary.used);
       } catch (error) {
         flushAll();
         conversationRef.current.removeLastMessage();

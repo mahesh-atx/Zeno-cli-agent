@@ -264,20 +264,24 @@ export const COMMANDS: Array<CommandMeta & { handler: CommandHandler }> = [
   },
   {
     name: "/add",
-    description: "Add a file to persistent context",
-    usage: "<file>",
+    description: "Add a file to context window",
+    usage: "/add <path>",
+    aliases: [],
     handler: handleAdd,
   },
   {
     name: "/remove",
-    description: "Remove a file from context",
-    usage: "<file>",
+    description: "Remove a file from context window",
+    usage: "/remove <path>",
+    aliases: [],
     handler: handleRemove,
   },
   {
-    name: "/files",
-    description: "List files currently in context",
-    handler: handleFiles,
+    name: "/context",
+    description: "Show context window summary",
+    usage: "/context",
+    aliases: [],
+    handler: handleFiles, // using existing handleFiles as placeholder handler
   },
   {
     name: "/tokens",

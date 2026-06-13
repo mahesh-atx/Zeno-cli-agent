@@ -10,7 +10,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
-    "test": "tsc --noEmit && tsx src/errors/test-manual.test.ts && tsx src/errors/test-tools.test.ts && tsx src/errors/test-agent-retry.test.ts && tsx src/errors/test-llm-self-correct.test.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@ai-sdk/groq": "^1.2.9",
@@ -35,6 +35,7 @@
     "@types/react": "^18.3.1",
     "tsup": "^8.4.0",
     "tsx": "^4.22.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.8"
   }
 }

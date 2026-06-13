@@ -1,9 +1,8 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface Message {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+// Re-export from conversation to avoid duplicate definitions
+// tokens.ts uses this for its count functions
+import type { Message } from "../core/conversation";
 
 // ─── Token Counting ───────────────────────────────────────────────────────────
 

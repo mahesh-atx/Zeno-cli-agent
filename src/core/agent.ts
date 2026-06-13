@@ -23,10 +23,11 @@ import { catchToolError } from "../errors/toolErrors";
 
 // ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export interface AgentOptions {
+  export interface AgentOptions {
   provider: ProviderName;
   model: string;
   conversation: Conversation;
+  contextManager?: import("./context").ContextManager;
   onToken?: (token: string) => void;
   onToolCall?: (toolName: string, input: unknown) => void;
   onToolResult?: (toolName: string, result: unknown) => void;
@@ -185,10 +186,11 @@ async function waitForUserRetry(
 // ━━━ Agent Loop ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export async function runAgent(options: AgentOptions): Promise<string> {
-  const {
+   const {
     provider,
     model,
     conversation,
+    contextManager,
     onToken,
     onToolCall,
     onToolResult,
@@ -203,6 +205,27 @@ export async function runAgent(options: AgentOptions): Promise<string> {
 
   if (onPermissionRequest) {
     setPermissionHandler(onPermissionRequest);
+  }
+
+  // ── Inject context files into system prompt ──────────────────
+  // If a ContextManager is provided, rebuild the system prompt
+  // with context files prepended before every agent run.
+  if (contextManager) {
+    const fullSystemPrompt = contextManager.buildSystemPrompt(
+      conversation.getBaseSystemPrompt()
+    );
+    conversation.updateSystemPrompt(fullSystemPrompt);
+
+    // Auto-truncate history if we are near the token limit
+    const historyTokens = conversation.getHistoryTokens();
+    if (contextManager.shouldTruncate(historyTokens)) {
+      const allMessages = conversation.getMessages();
+      const { truncated, removedCount } =
+        contextManager.truncateHistory(allMessages);
+      if (removedCount > 0) {
+        conversation.applyTruncatedHistory(truncated);
+      }
+    }
   }
 
   const providerModel = buildProviderModel(provider, model);
