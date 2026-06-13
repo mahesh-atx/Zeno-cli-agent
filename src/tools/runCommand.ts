@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { execa } from "execa";
+import execa from "execa";
 import { askPermission } from "../core/permissions";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
