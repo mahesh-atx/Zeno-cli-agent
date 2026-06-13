@@ -17,6 +17,8 @@ import { runAgent } from "../core/agent";
 import { PROVIDER_MODELS } from "../providers";
 import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
+import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
+import { isAuthEvent, isNetworkEvent, isRateLimitEvent } from "../errors/base";
 
 const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
@@ -60,7 +62,32 @@ export function App() {
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null);
   const [termWidth, setTermWidth] = useState(process.stdout.columns ?? 80);
+    // ━━━ Error system state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // agentStatus drives what the UI shows during/after the loop
+  type AgentStatus =
+    | "idle"
+    | "running"
+    | "retrying"
+    | "rate_limited"
+    | "network_dropped"
+    | "fatal_error";
 
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  // Countdown remaining ms for rate limit display
+  const [rateLimitMs, setRateLimitMs] = useState<number | null>(null);
+  // Whether user can press R to retry (network drop state)
+  const [networkDropped, setNetworkDropped] = useState(false);
+  // Retry attempt counter shown in status
+  const [retryAttempt, setRetryAttempt] = useState(0);
+
+  // retrySignal — a shared mutable ref the agent polls
+  // We use a ref (not state) so the polling loop sees the latest value
+  // without causing re-renders on every poll tick.
+  const retryPressedRef = useRef(false);
+  const retrySignal = {
+    shouldRetry: () => retryPressedRef.current,
+    reset: () => { retryPressedRef.current = false; },
+  };
   const conversationRef = useRef(new Conversation());
   const contextManagerRef = useRef(new ContextManager(config.defaultProvider));
 
@@ -337,6 +364,11 @@ export function App() {
       currentToolIdRef.current = null;
       setLivePreview({ text: "", activeTool: null });
 
+            setAgentStatus("running");
+      setRateLimitMs(null);
+      setNetworkDropped(false);
+      setRetryAttempt(0);
+
       try {
         await runAgent({
           provider: currentProvider,
@@ -346,18 +378,12 @@ export function App() {
           onToken: (token) => {
             fullResponseRef.current += token;
             streamBufferRef.current += token;
-
-            // Flush any completed paragraphs into scroll-safe history
             flushParagraphs();
-
-            // Update live preview (throttled to ~16fps)
             scheduleLiveUpdate();
           },
 
           onToolCall: (toolName, input) => {
-            // Commit any pending text before the tool call
             flushAll();
-
             const toolId = nextToolId();
             const toolCall: ToolCall = {
               id: toolId,
@@ -367,8 +393,6 @@ export function App() {
             };
             activeToolCallsRef.current.set(toolId, toolCall);
             currentToolIdRef.current = toolId;
-
-            // Show running tool in live preview
             setLivePreview({
               text: "",
               activeTool: toolCall,
@@ -409,7 +433,7 @@ export function App() {
                   resultSummary = `${r.lines} lines (${r.size} bytes)`;
                   break;
                 case "write_file":
-                  resultSummary = `${r.isNew ? "Created" : "Updated"} — ${r.bytesWritten} bytes`;
+                  resultSummary = `${r.isNew ? "Created" : "Updated"} → ${r.bytesWritten} bytes`;
                   break;
                 case "edit_file":
                   resultSummary = `${r.linesChanged} lines changed`;
@@ -444,7 +468,6 @@ export function App() {
               stderr,
             };
 
-            // Push completed tool call to history
             pushCompleted({
               id: nextId(),
               role: "assistant",
@@ -464,7 +487,49 @@ export function App() {
 
           onPermissionRequest: requestPermission,
 
-          onError: (error) => {
+          // ── Typed event callbacks ──────────────────────────────
+
+          onAgentEvent: (event: AgentEvent) => {
+            // Log every event as a system notice so the user can
+            // see what the agent is doing (retrying, waiting, etc.)
+            if (event.kind === "server_error" || event.kind === "network_error") {
+              pushNotice(`⚠ ${event.message}`);
+            }
+          },
+
+          onRateLimitWait: (event: RateLimitEvent, remainingMs: number) => {
+            setAgentStatus("rate_limited");
+            setRateLimitMs(remainingMs);
+            if (remainingMs === 0) {
+              setRateLimitMs(null);
+              setAgentStatus("retrying");
+              setRetryAttempt((n) => n + 1);
+            }
+          },
+
+          onNetworkDrop: (event: NetworkEvent) => {
+            setAgentStatus("network_dropped");
+            setNetworkDropped(true);
+            flushAll();
+            pushCompleted({
+              id: nextId(),
+              role: "error",
+              content: event.message,
+            });
+          },
+
+          onFatalError: (event: AgentEvent) => {
+            flushAll();
+            setAgentStatus("fatal_error");
+            pushCompleted({
+              id: nextId(),
+              role: "error",
+              content: event.message,
+            });
+          },
+
+          onError: (error: Error) => {
+            // Legacy fallback — only fires if no typed handler caught it
             flushAll();
             pushCompleted({
               id: nextId(),
@@ -472,6 +537,8 @@ export function App() {
               content: error.message,
             });
           },
+
+          retrySignal,
         });
 
         flushAll();
@@ -488,6 +555,9 @@ export function App() {
         });
       } finally {
         setLivePreview({ text: "", activeTool: null });
+        setAgentStatus("idle");
+        setRateLimitMs(null);
+        setNetworkDropped(false);
         setIsLoading(false);
       }
     },
@@ -504,10 +574,17 @@ export function App() {
     ]
   );
 
-  useInput((input, key) => {
+    useInput((input, key) => {
     if (key.ctrl && input === "c") exit();
-  });
 
+    // R to retry after network drop — only active when dropped
+    if ((input === "r" || input === "R") && networkDropped) {
+      retryPressedRef.current = true;
+      setNetworkDropped(false);
+      setAgentStatus("retrying");
+      pushNotice("Retrying connection...");
+    }
+  });
   const staticItems: Array<
     { kind: "welcome" } | { kind: "message"; msg: ChatMessage }
   > = [

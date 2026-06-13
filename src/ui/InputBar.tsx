@@ -13,6 +13,8 @@ interface InputBarProps {
   isDisabled: boolean;
   placeholder?: string;
   width: number;
+  /** When true, show R-to-retry prompt and accept R keypress */
+  networkDropped?: boolean;
 }
 
 // ─── Slash command fuzzy index ────────────────────────────────────────────────
@@ -91,6 +93,7 @@ export function InputBar({
   isDisabled,
   placeholder = 'Try "fix typecheck errors" or @filename',
   width,
+  networkDropped = false,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -251,6 +254,17 @@ export function InputBar({
 
   return (
     <Box flexDirection="column">
+      {/* Network drop retry prompt */}
+      {networkDropped && (
+        <Box marginTop={1} paddingX={1}>
+          <Text color="red" bold>
+            ✖ Network connection lost.{" "}
+          </Text>
+          <Text color="yellow" bold>
+            Press R to retry.
+          </Text>
+        </Box>
+      )}
       {/* Input box */}
       <Box marginTop={1}>
         <Box

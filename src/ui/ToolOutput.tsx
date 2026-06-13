@@ -52,17 +52,34 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
   const { toolName, input, status, resultSummary, stdout, stderr } = toolCall;
   const inputSummary = formatInput(input);
 
-  return (
-    <Box flexDirection="column" marginTop={1}>
+    return (
+    <Box
+      flexDirection="column"
+      marginTop={1}
+      // Red left border when tool failed — makes errors visually trackable
+      borderStyle={status === "error" ? "single" : undefined}
+      borderColor={status === "error" ? "red" : undefined}
+      borderLeft={status === "error" ? true : undefined}
+      borderRight={false}
+      borderTop={false}
+      borderBottom={false}
+      paddingLeft={status === "error" ? 1 : 0}
+    >
       <Box>
         <StatusIcon status={status} />
-        <Text color="cyan" bold> {toolName}</Text>
-        {inputSummary && <Text color="gray">  ({inputSummary})</Text>}
+        <Text color={status === "error" ? "red" : "cyan"} bold>
+          {" "}{toolName}
+        </Text>
+        {inputSummary && (
+          <Text color={status === "error" ? "red" : "gray"}>
+            {"  "}({inputSummary})
+          </Text>
+        )}
       </Box>
 
       {resultSummary && status !== "running" && (
         <Box marginLeft={2}>
-          <Text color="gray">└ </Text>
+          <Text color="gray">→ </Text>
           <Text
             color={
               status === "success"
@@ -71,6 +88,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
                 ? "yellow"
                 : "red"
             }
+            bold={status === "error"}
           >
             {resultSummary}
           </Text>
@@ -103,7 +121,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
             .split("\n")
             .slice(0, 10)
             .map((line, i) => (
-              <Text key={i} color="yellow">
+              <Text key={i} color={status === "error" ? "red" : "yellow"}>
                 {"  "}{line}
               </Text>
             ))}

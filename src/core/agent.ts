@@ -1,3 +1,4 @@
+// src/core/agent.ts
 import { streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq } from "@ai-sdk/groq";
@@ -7,8 +8,20 @@ import type { Conversation } from "./conversation";
 import type { ProviderName } from "./config";
 import { getTool, buildAISDKTools } from "../tools";
 import type { ActionType } from "./permissions";
+import { translateProviderError } from "../errors/apiErrors";
+import {
+  isRateLimitEvent,
+  isAuthEvent,
+  isNetworkEvent,
+  isServerErrorEvent,
+  makeToolErrorEvent,
+  type AgentEvent,
+  type RateLimitEvent,
+  type NetworkEvent,
+} from "../errors/base";
+import { catchToolError } from "../errors/toolErrors";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface AgentOptions {
   provider: ProviderName;
@@ -22,10 +35,35 @@ export interface AgentOptions {
     title: string,
     details: string[]
   ) => Promise<boolean>;
+  // Typed event callbacks — replaces generic onError
+  onAgentEvent?: (event: AgentEvent) => void;
+  // Called when a rate limit requires a countdown wait
+  onRateLimitWait?: (event: RateLimitEvent, remainingMs: number) => void;
+  // Called when a network drop requires user to press R
+  onNetworkDrop?: (event: NetworkEvent) => void;
+  // Called when an unrecoverable error stops the loop
+  onFatalError?: (event: AgentEvent) => void;
+  // Signal that user pressed R to resume after network drop
+  retrySignal?: { shouldRetry: () => boolean; reset: () => void };
+  // Legacy — kept for backward compatibility, receives event.message
   onError?: (error: Error) => void;
 }
 
-// ─── Build Provider Model ─────────────────────────────────────────────────────
+// ━━━ Retry Configuration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const MAX_ITERATIONS = 10;
+const MAX_RETRIES = 4;
+
+// Exponential backoff: 1s, 2s, 4s, 8s
+function getBackoffMs(attempt: number): number {
+  return Math.min(1000 * Math.pow(2, attempt - 1), 30_000);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ━━━ Build Provider Model ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function buildProviderModel(provider: ProviderName, model: string) {
   switch (provider) {
@@ -61,7 +99,7 @@ function buildProviderModel(provider: ProviderName, model: string) {
   }
 }
 
-// ─── Tool Result Summary ──────────────────────────────────────────────────────
+// ━━━ Tool Result Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function getToolResultSummary(toolName: string, result: unknown): string {
   if (typeof result !== "object" || result === null) return String(result);
@@ -88,9 +126,8 @@ function getToolResultSummary(toolName: string, result: unknown): string {
   }
 }
 
-// ─── Permission Bridge ────────────────────────────────────────────────────────
+// ━━━ Permission Bridge ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Global permission handler — set by App.tsx before agent runs
 let globalPermissionHandler:
   | ((action: ActionType, title: string, details: string[]) => Promise<boolean>)
   | null = null;
@@ -109,11 +146,43 @@ export async function requestPermission(
   if (globalPermissionHandler) {
     return globalPermissionHandler(action, title, details);
   }
-  // Fallback — auto-approve if no UI handler registered
   return true;
 }
 
-// ─── Agent Loop ───────────────────────────────────────────────────────────────
+// ━━━ Rate Limit Wait ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pauses the loop and fires countdown ticks every second.
+
+async function waitForRateLimit(
+  event: RateLimitEvent,
+  onTick?: (event: RateLimitEvent, remainingMs: number) => void
+): Promise<void> {
+  let remaining = event.retryAfterMs;
+  const TICK_MS = 1000;
+
+  while (remaining > 0) {
+    if (onTick) onTick(event, remaining);
+    const wait = Math.min(TICK_MS, remaining);
+    await sleep(wait);
+    remaining -= wait;
+  }
+  // Final tick at 0
+  if (onTick) onTick(event, 0);
+}
+
+// ━━━ Network Drop Wait ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pauses the loop until user presses R (via retrySignal).
+
+async function waitForUserRetry(
+  retrySignal: NonNullable<AgentOptions["retrySignal"]>
+): Promise<void> {
+  // Poll every 200ms — cheap, no busy loop
+  while (!retrySignal.shouldRetry()) {
+    await sleep(200);
+  }
+  retrySignal.reset();
+}
+
+// ━━━ Agent Loop ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export async function runAgent(options: AgentOptions): Promise<string> {
   const {
@@ -124,10 +193,14 @@ export async function runAgent(options: AgentOptions): Promise<string> {
     onToolCall,
     onToolResult,
     onPermissionRequest,
+    onAgentEvent,
+    onRateLimitWait,
+    onNetworkDrop,
+    onFatalError,
+    retrySignal,
     onError,
   } = options;
 
-  // Wire permission handler for this run
   if (onPermissionRequest) {
     setPermissionHandler(onPermissionRequest);
   }
@@ -142,29 +215,91 @@ export async function runAgent(options: AgentOptions): Promise<string> {
 
   let fullAssistantText = "";
   let iterationCount = 0;
-  const MAX_ITERATIONS = 10;
 
   while (iterationCount < MAX_ITERATIONS) {
     iterationCount++;
 
-    const pendingToolCalls: Array<{
-      toolName: string;
-      input: unknown;
-    }> = [];
+    const pendingToolCalls: Array<{ toolName: string; input: unknown }> = [];
 
+    // ── HTTP call with retry loop ──────────────────────────────
+    let streamResult: ReturnType<typeof streamText> | null = null;
+    let attempt = 0;
+
+    while (attempt < MAX_RETRIES) {
+      attempt++;
+
+      try {
+        streamResult = streamText({
+          model: providerModel,
+          messages,
+          tools: aiTools,
+          maxSteps: 1,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+        });
+
+        // Attempt to access the stream — this is where SDK throws
+        // We need to force evaluation to catch HTTP errors here.
+        // If streamText is lazy, the error surfaces during iteration below.
+        break; // Success — exit retry loop
+
+      } catch (rawError) {
+        const event = translateProviderError(provider, rawError, attempt);
+
+        if (onAgentEvent) onAgentEvent(event);
+
+        // ── Rate limit: pause and countdown ──
+        if (isRateLimitEvent(event)) {
+          await waitForRateLimit(event, onRateLimitWait);
+          continue; // retry
+        }
+
+        // ── Server error: exponential backoff ──
+        if (isServerErrorEvent(event)) {
+          if (attempt >= MAX_RETRIES) {
+            if (onFatalError) onFatalError(event);
+            if (onError) onError(new Error(event.message));
+            return fullAssistantText;
+          }
+          const backoff = getBackoffMs(attempt);
+          await sleep(backoff);
+          continue; // retry
+        }
+
+        // ── Network drop: pause until user presses R ──
+        if (isNetworkEvent(event)) {
+          if (onNetworkDrop) onNetworkDrop(event);
+          if (retrySignal) {
+            await waitForUserRetry(retrySignal);
+            continue; // retry
+          }
+          // No retry signal wired — treat as fatal for this attempt
+          if (onFatalError) onFatalError(event);
+          if (onError) onError(new Error(event.message));
+          return fullAssistantText;
+        }
+
+        // ── Auth error: unrecoverable — hand to UI ──
+        if (isAuthEvent(event)) {
+          if (onFatalError) onFatalError(event);
+          if (onError) onError(new Error(event.message));
+          return fullAssistantText;
+        }
+
+        // ── Unknown: stop ──
+        if (onFatalError) onFatalError(event);
+        if (onError) onError(new Error(event.message));
+        return fullAssistantText;
+      }
+    }
+
+    if (!streamResult) break;
+
+    // ── Stream consumption with mid-stream error handling ──────
     try {
-      const result = streamText({
-        model: providerModel,
-        messages,
-        tools: aiTools,
-        maxSteps: 1,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens,
-      });
-
       let chunkText = "";
 
-      for await (const chunk of result.fullStream) {
+      for await (const chunk of streamResult.fullStream) {
         if (chunk.type === "text-delta") {
           const token = chunk.textDelta;
           chunkText += token;
@@ -178,54 +313,76 @@ export async function runAgent(options: AgentOptions): Promise<string> {
         }
       }
 
-      // No tool calls — done
+      // No tool calls → done
       if (pendingToolCalls.length === 0) break;
 
       if (chunkText) {
         messages.push({ role: "assistant", content: chunkText });
       }
 
-      // Execute each tool
-      for (const { toolName, input } of pendingToolCalls) {
-        if (onToolCall) onToolCall(toolName, input);
+    } catch (streamError) {
+      // Mid-stream errors (connection drops mid-response)
+      const event = translateProviderError(provider, streamError, attempt);
 
-        const toolDef = getTool(toolName);
+      if (onAgentEvent) onAgentEvent(event);
 
-        if (!toolDef) {
-          const errResult = { success: false, error: `Tool not found: ${toolName}` };
-          if (onToolResult) onToolResult(toolName, errResult);
-          messages.push({
-            role: "user",
-            content: `Tool result for ${toolName}:\n${JSON.stringify(errResult, null, 2)}`,
-          });
+      if (isNetworkEvent(event)) {
+        if (onNetworkDrop) onNetworkDrop(event);
+        if (retrySignal) {
+          await waitForUserRetry(retrySignal);
+          iterationCount--; // Retry this iteration
           continue;
         }
+      }
 
-        let toolResult: unknown;
+      if (onFatalError) onFatalError(event);
+      if (onError) onError(new Error(event.message));
+      return fullAssistantText;
+    }
 
-        try {
-          toolResult = await toolDef.execute(input);
-        } catch (toolError) {
-          toolResult = {
-            success: false,
-            error: toolError instanceof Error ? toolError.message : "Unknown tool error",
-          };
-        }
+    // ── Tool execution ─────────────────────────────────────────
+    for (const { toolName, input } of pendingToolCalls) {
+      if (onToolCall) onToolCall(toolName, input);
 
-        if (onToolResult) onToolResult(toolName, toolResult);
+      const toolDef = getTool(toolName);
 
+      if (!toolDef) {
+        // Tool not found → clean result back to LLM
+        const errResult = {
+          success: false,
+          error: `Tool not found: ${toolName}`,
+          toolName,
+        };
+        if (onToolResult) onToolResult(toolName, errResult);
         messages.push({
           role: "user",
-          content: `Tool result for ${toolName}:\n${JSON.stringify(toolResult, null, 2)}`,
+          content: `Tool result for ${toolName}:\n${JSON.stringify(errResult, null, 2)}`,
         });
+        continue;
       }
 
-    } catch (error) {
-      if (error instanceof Error) {
-        if (onError) onError(error);
-        throw error;
+      let toolResult: unknown;
+
+      try {
+        // wrapExecute in tools/index.ts already catches OS errors,
+        // but we have a second safety net here for anything that escapes.
+        toolResult = await toolDef.execute(input);
+      } catch (toolError) {
+        // This catch should rarely fire — wrapExecute handles it.
+        // Belt-and-suspenders: format cleanly, never crash.
+        const failure = catchToolError(toolName, toolError);
+        const event = makeToolErrorEvent(toolName, toolError);
+        if (onAgentEvent) onAgentEvent(event);
+        toolResult = failure;
       }
-      throw new Error("Unknown error in agent loop");
+
+      if (onToolResult) onToolResult(toolName, toolResult);
+
+      // Feed tool result back to LLM (including errors — LLM self-corrects)
+      messages.push({
+        role: "user",
+        content: `Tool result for ${toolName}:\n${JSON.stringify(toolResult, null, 2)}`,
+      });
     }
   }
 

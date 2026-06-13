@@ -1,12 +1,14 @@
+// src/providers/index.ts
 import type { Config, ProviderName } from "../core/config";
 import type { Message } from "../core/conversation";
 import type { StreamResult } from "./openrouter";
+import type { AgentEvent } from "../errors/base";
 
 import { chatWithOpenRouter } from "./openrouter";
 import { chatWithGroq, GROQ_MODELS, GROQ_DEFAULT_MODEL } from "./groq";
 import { chatWithNvidia, NVIDIA_MODELS, NVIDIA_DEFAULT_MODEL } from "./nvidia";
 
-// ─── Model Registry ───────────────────────────────────────────────────────────
+// ─── Model Registry ───────────────────────────────────────────
 
 export const PROVIDER_MODELS: Record<ProviderName, readonly string[]> = {
   openrouter: [
@@ -27,57 +29,55 @@ export const PROVIDER_DEFAULT_MODELS: Record<ProviderName, string> = {
   nvidia: NVIDIA_DEFAULT_MODEL,
 };
 
-// ─── Provider Factory ─────────────────────────────────────────────────────────
+// ─── Provider Factory ─────────────────────────────────────────
+// Return type is now StreamResult | AgentEvent — callers must
+// check whether the result is an event before consuming the stream.
 
-/**
- * Returns a chat function for the given provider name.
- * All three return the same StreamResult interface.
- */
 export function getProvider(
   providerName: ProviderName,
   config: Config
-): (messages: Message[], model: string) => Promise<StreamResult> {
+): (messages: Message[], model: string, attempt?: number) => Promise<StreamResult | AgentEvent> {
   switch (providerName) {
     case "openrouter":
-      return (messages, model) => chatWithOpenRouter(messages, model, config);
+      return (messages, model, attempt = 1) =>
+        chatWithOpenRouter(messages, model, config, attempt);
 
     case "groq":
-      return (messages, model) => chatWithGroq(messages, model, config);
+      return (messages, model, attempt = 1) =>
+        chatWithGroq(messages, model, config, attempt);
 
     case "nvidia":
-      return (messages, model) => chatWithNvidia(messages, model, config);
+      return (messages, model, attempt = 1) =>
+        chatWithNvidia(messages, model, config, attempt);
 
     default: {
-      // TypeScript exhaustive check
       const _exhaustive: never = providerName;
       throw new Error(`Unknown provider: ${_exhaustive}`);
     }
   }
 }
 
-/**
- * Returns the default model for a given provider.
- */
+// ─── Type Guard ───────────────────────────────────────────────
+// Use this wherever getProvider result is consumed to distinguish
+// a successful StreamResult from a typed AgentEvent failure.
+
+export function isStreamResult(
+  result: StreamResult | AgentEvent
+): result is StreamResult {
+  return "stream" in result;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+
 export function getDefaultModel(providerName: ProviderName): string {
   return PROVIDER_DEFAULT_MODELS[providerName];
 }
 
-/**
- * Returns all models for a given provider.
- */
 export function getModelsForProvider(providerName: ProviderName): readonly string[] {
   return PROVIDER_MODELS[providerName];
 }
 
-/**
- * Validates that a model name is known for a given provider.
- * Returns true for unknown models too — providers may accept
- * models not in our local list.
- */
-export function isKnownModel(
-  providerName: ProviderName,
-  model: string
-): boolean {
+export function isKnownModel(providerName: ProviderName, model: string): boolean {
   return PROVIDER_MODELS[providerName].includes(model);
 }
 
