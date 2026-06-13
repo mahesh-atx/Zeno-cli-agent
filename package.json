@@ -7,15 +7,19 @@
     "cli-agent": "./dist/index.js"
   },
   "scripts": {
+    "test": "jest",
     "build": "tsup src/index.ts --format cjs --dts",
     "dev": "tsup src/index.ts --format cjs --watch",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@ai-sdk/groq": "^1.2.9",
-    "@ai-sdk/openai": "^1.3.22",
-    "ai": "^4.3.16",
-    "dotenv": "^16.4.7"
+    "@ai-sdk/openai": "^1.3.24",
+    "ai": "^4.3.19",
+    "chalk": "^5.6.2",
+    "dotenv": "^16.6.1",
+    "execa": "^9.6.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
