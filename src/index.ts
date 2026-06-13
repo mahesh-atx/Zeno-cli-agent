@@ -10,11 +10,13 @@ if (major < 18) {
   process.exit(1);
 }
 
-// IMPORTANT: do NOT pass { stdout: ..., patchConsole: false } or fullscreen options.
-// Default render() flows in the terminal like normal output and supports scrolling.
-const { waitUntilExit } = render(React.createElement(App), {
+// Push the cursor down a bit so Ink doesn't render at the very top
+// when the terminal is empty. This gives the app room to grow downward.
+process.stdout.write("\n");
+
+const instance = render(React.createElement(App), {
   exitOnCtrlC: true,
-  // patchConsole defaults to true — fine.
+  patchConsole: false,
 });
 
-waitUntilExit().then(() => process.exit(0));
+instance.waitUntilExit().then(() => process.exit(0));

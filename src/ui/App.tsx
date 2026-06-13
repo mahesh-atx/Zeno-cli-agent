@@ -6,6 +6,7 @@ import { InputBar } from "./InputBar";
 import { StatusLine } from "./StatusLine";
 import { PermissionPrompt } from "./PermissionPrompt";
 import { MessageItem } from "./MessageItem";
+import { ToolOutput } from "./ToolOutput";
 import type { ChatMessage } from "./MessageItem";
 import type { ToolCall, ToolStatus } from "./ToolOutput";
 import type { PendingPermission } from "./PermissionPrompt";
@@ -15,6 +16,7 @@ import { Conversation } from "../core/conversation";
 import { runAgent } from "../core/agent";
 import { PROVIDER_MODELS } from "../providers";
 import { formatTokenCount } from "../utils/tokens";
+import { ContextManager } from "../core/context";
 
 const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
@@ -35,7 +37,7 @@ const MAX_LIVE_CHARS = 1200;
 
 // Throttle live state updates so we don't re-render every single token
 // on fast streams. 60ms ≈ ~16fps, smooth and easy on the terminal.
-const LIVE_UPDATE_MS = 30;
+const LIVE_UPDATE_MS = 60;
 
 export function App() {
   const { exit } = useApp();
@@ -59,6 +61,7 @@ export function App() {
   const [termWidth, setTermWidth] = useState(process.stdout.columns ?? 80);
 
   const conversationRef = useRef(new Conversation());
+  const contextManagerRef = useRef(new ContextManager(config.defaultProvider));
 
   // Buffer of in-flight assistant text (committed text not yet flushed)
   const streamBufferRef = useRef<string>("");
@@ -517,41 +520,46 @@ export function App() {
         }}
       </Static>
 
-      {/* DYNAMIC region — live preview (bounded height) */}
-      {pendingPermission && (
-        <Box marginX={1}>
-          <PermissionPrompt permission={pendingPermission} />
-        </Box>
-      )}
+      {/* DYNAMIC region — wrapped in a single container so Ink treats it as one unit */}
+      <Box flexDirection="column">
+        {pendingPermission && (
+          <Box marginX={1}>
+            <PermissionPrompt permission={pendingPermission} />
+          </Box>
+        )}
 
-      {!pendingPermission && showLive && (
-        <LivePreview
-          text={livePreview.text}
-          activeTool={livePreview.activeTool}
+        {!pendingPermission && showLive && (
+          <LivePreview
+            text={livePreview.text}
+            activeTool={livePreview.activeTool}
+          />
+        )}
+
+        {!pendingPermission && isLoading && !showLive && (
+          <LivePreview text="" activeTool={null} thinkingOnly />
+        )}
+
+        {/* Input bar (includes menu below itself) */}
+        <InputBar
+          onSubmit={handleSubmit}
+          isDisabled={isLoading || pendingPermission !== null}
+          width={termWidth}
+          placeholder={
+            pendingPermission
+              ? "Waiting for permission response (y/n)..."
+              : 'Try "read package.json" or @src/index.ts'
+          }
         />
-      )}
 
-      {!pendingPermission && isLoading && !showLive && (
-        <LivePreview text="" activeTool={null} thinkingOnly />
-      )}
-
-      <InputBar
-        onSubmit={handleSubmit}
-        isDisabled={isLoading || pendingPermission !== null}
-        width={termWidth}
-        placeholder={
-          pendingPermission
-            ? "Waiting for permission response (y/n)..."
-            : 'Try "fix typecheck errors"'
-        }
-      />
-
-      <StatusLine
-        provider={currentProvider}
-        model={currentModel}
-        tokenCount={tokenCount}
-        tokenLimit={TOKEN_LIMITS[currentProvider]}
-      />
+        {/* Status line — stays at the very bottom */}
+        <StatusLine
+          provider={currentProvider}
+          model={currentModel}
+          tokenCount={tokenCount}
+          tokenLimit={TOKEN_LIMITS[currentProvider]}
+          contextFileCount={contextManagerRef.current.getFileCount()}
+        />
+      </Box>
     </Box>
   );
 }
