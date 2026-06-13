@@ -9,13 +9,14 @@ interface LivePreviewProps {
   text: string;
   activeTool: ToolCall | null;
   thinkingOnly?: boolean;
+  hideIcon?: boolean;
 }
 
 // Max lines shown in the live preview. Anything beyond this scrolls within
 // the preview window itself (we tail the latest lines).
 const MAX_PREVIEW_LINES = 12;
 
-export function LivePreview({ text, activeTool, thinkingOnly }: LivePreviewProps) {
+export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePreviewProps) {
   if (thinkingOnly) {
     return (
       <Box marginTop={1} paddingX={1}>
@@ -48,15 +49,17 @@ export function LivePreview({ text, activeTool, thinkingOnly }: LivePreviewProps
   const hasOverflow = lines.length > MAX_PREVIEW_LINES;
 
   return (
-    <Box marginTop={1} paddingX={1} flexDirection="column">
-      <Box>
-        <Text color="cyan" bold>✻ </Text>
-        <Text color="gray" dimColor>
-          {hasOverflow
-            ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${lines.length} lines)…`
-            : "streaming…"}
-        </Text>
-      </Box>
+    <Box marginTop={hideIcon ? 0 : 1} paddingX={1} flexDirection="column">
+      {!hideIcon && (
+        <Box>
+          <Text color="cyan" bold>✻ </Text>
+          <Text color="gray" dimColor>
+            {hasOverflow
+              ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${lines.length} lines)…`
+              : "streaming…"}
+          </Text>
+        </Box>
+      )}
       <Box flexDirection="column" marginLeft={2}>
         {tail.map((line, i) => (
           <Text key={i} wrap="wrap">

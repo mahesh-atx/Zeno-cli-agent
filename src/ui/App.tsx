@@ -48,6 +48,7 @@ export function App() {
   const [livePreview, setLivePreview] = useState<{
     text: string;
     activeTool: ToolCall | null;
+    hideIcon?: boolean;
   }>({ text: "", activeTool: null });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -74,6 +75,7 @@ export function App() {
   const activeToolCallsRef = useRef(new Map<string, ToolCall>());
   // Currently-running tool (the one we render live)
   const currentToolIdRef = useRef<string | null>(null);
+  const isFirstChunkRef = useRef<boolean>(true);
 
   useEffect(() => {
     const handleResize = () => setTermWidth(process.stdout.columns ?? 80);
@@ -108,6 +110,7 @@ export function App() {
       setLivePreview({
         text: streamBufferRef.current,
         activeTool: tool,
+        hideIcon: !isFirstChunkRef.current,
       });
       return;
     }
@@ -123,6 +126,7 @@ export function App() {
       setLivePreview({
         text: streamBufferRef.current,
         activeTool: tool,
+        hideIcon: !isFirstChunkRef.current,
       });
     }, LIVE_UPDATE_MS - since);
   }, []);
@@ -144,7 +148,9 @@ export function App() {
           role: "assistant",
           content: chunk.replace(/\n+$/, ""),
           isStreaming: false,
+          hideIcon: !isFirstChunkRef.current,
         });
+        isFirstChunkRef.current = false;
         didFlush = true;
       }
       idx = buf.indexOf(PARAGRAPH_BREAK);
@@ -163,7 +169,9 @@ export function App() {
           role: "assistant",
           content: chunk.replace(/\n+$/, ""),
           isStreaming: false,
+          hideIcon: !isFirstChunkRef.current,
         });
+        isFirstChunkRef.current = false;
         didFlush = true;
       }
     }
@@ -185,7 +193,9 @@ export function App() {
         role: "assistant",
         content: buf.replace(/\n+$/, ""),
         isStreaming: false,
+        hideIcon: !isFirstChunkRef.current,
       });
+      isFirstChunkRef.current = false;
     }
     streamBufferRef.current = "";
   }, [pushCompleted]);
@@ -322,6 +332,7 @@ export function App() {
       setIsLoading(true);
       streamBufferRef.current = "";
       fullResponseRef.current = "";
+      isFirstChunkRef.current = true;
       activeToolCallsRef.current.clear();
       currentToolIdRef.current = null;
       setLivePreview({ text: "", activeTool: null });
@@ -358,7 +369,11 @@ export function App() {
             currentToolIdRef.current = toolId;
 
             // Show running tool in live preview
-            setLivePreview({ text: "", activeTool: toolCall });
+            setLivePreview({
+              text: "",
+              activeTool: toolCall,
+              hideIcon: !isFirstChunkRef.current,
+            });
           },
 
           onToolResult: (toolName, result) => {
@@ -436,7 +451,9 @@ export function App() {
               content: "",
               isStreaming: false,
               toolCalls: [finishedTool],
+              hideIcon: !isFirstChunkRef.current,
             });
+            isFirstChunkRef.current = false;
 
             activeToolCallsRef.current.delete(targetId);
             if (currentToolIdRef.current === targetId) {
@@ -532,6 +549,7 @@ export function App() {
           <LivePreview
             text={livePreview.text}
             activeTool={livePreview.activeTool}
+            hideIcon={livePreview.hideIcon}
           />
         )}
 

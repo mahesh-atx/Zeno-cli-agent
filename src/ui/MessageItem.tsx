@@ -12,6 +12,7 @@ export interface ChatMessage {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
+  hideIcon?: boolean;
 }
 
 interface MessageItemProps {
@@ -33,10 +34,12 @@ function AssistantMessage({
   content,
   isStreaming,
   toolCalls,
+  hideIcon,
 }: {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
+  hideIcon?: boolean;
 }) {
   const rendered = isStreaming
     ? renderStreaming(content)
@@ -45,28 +48,31 @@ function AssistantMessage({
     : "";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box>
-        <Text color="cyan" bold>✻ </Text>
-        {isStreaming && !content && <Text color="dim">thinking…</Text>}
+    <Box flexDirection="row" marginTop={hideIcon ? 0 : 1}>
+      <Box width={2} flexShrink={0}>
+        {!hideIcon && <Text color="cyan" bold>✻ </Text>}
       </Box>
 
-      {toolCalls && toolCalls.length > 0 && (
-        <Box flexDirection="column" marginLeft={2}>
-          {toolCalls.map((tc) => (
-            <ToolOutput key={tc.id} toolCall={tc} />
-          ))}
-        </Box>
-      )}
+      <Box flexDirection="column">
+        {isStreaming && !content && <Text color="dim">thinking…</Text>}
 
-      {rendered && (
-        <Box marginLeft={2} flexDirection="column">
-          <Text wrap="wrap">
-            {rendered}
-            {isStreaming && <Text color="cyan">▊</Text>}
-          </Text>
-        </Box>
-      )}
+        {toolCalls && toolCalls.length > 0 && (
+          <Box flexDirection="column">
+            {toolCalls.map((tc) => (
+              <ToolOutput key={tc.id} toolCall={tc} />
+            ))}
+          </Box>
+        )}
+
+        {rendered && (
+          <Box flexDirection="column">
+            <Text wrap="wrap">
+              {rendered}
+              {isStreaming && <Text color="cyan">▊</Text>}
+            </Text>
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 }
@@ -100,6 +106,7 @@ export function MessageItem({ message }: MessageItemProps) {
           content={message.content}
           isStreaming={message.isStreaming}
           toolCalls={message.toolCalls}
+          hideIcon={message.hideIcon}
         />
       );
     case "error":
