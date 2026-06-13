@@ -40,89 +40,70 @@ function StatusIcon({ status }: { status: ToolStatus }) {
         </Text>
       );
     case "success":
-      return <Text color="green">✓</Text>;
+      return <Text color="green">●</Text>;
     case "denied":
-      return <Text color="yellow">✗</Text>;
+      return <Text color="yellow">●</Text>;
     case "error":
-      return <Text color="red">!</Text>;
+      return <Text color="red">●</Text>;
   }
 }
 
 export function ToolOutput({ toolCall }: ToolOutputProps) {
   const { toolName, input, status, resultSummary, stdout, stderr } = toolCall;
   const inputSummary = formatInput(input);
+  const formattedName = toolName.charAt(0).toUpperCase() + toolName.slice(1);
 
-    return (
-    <Box
-      flexDirection="column"
-      marginTop={1}
-      // Red left border when tool failed — makes errors visually trackable
-      borderStyle={status === "error" ? "single" : undefined}
-      borderColor={status === "error" ? "red" : undefined}
-      borderLeft={status === "error" ? true : undefined}
-      borderRight={false}
-      borderTop={false}
-      borderBottom={false}
-      paddingLeft={status === "error" ? 1 : 0}
-    >
-      <Box>
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box marginLeft={2}>
         <StatusIcon status={status} />
-        <Text color={status === "error" ? "red" : "cyan"} bold>
-          {" "}{toolName}
+        <Text color="white" bold>
+          {"  "}{formattedName}
         </Text>
         {inputSummary && (
-          <Text color={status === "error" ? "red" : "gray"}>
-            {"  "}({inputSummary})
+          <Text dimColor>
+            {"  "}{inputSummary}
           </Text>
         )}
       </Box>
 
       {resultSummary && status !== "running" && (
-        <Box marginLeft={2}>
-          <Text color="gray">→ </Text>
-          <Text
-            color={
-              status === "success"
-                ? "green"
-                : status === "denied"
-                ? "yellow"
-                : "red"
-            }
-            bold={status === "error"}
-          >
+        <Box marginLeft={8}>
+          <Text dimColor>└  </Text>
+          <Text color="white">
             {resultSummary}
           </Text>
         </Box>
       )}
 
       {stdout && stdout.trim() && (
-        <Box flexDirection="column" marginLeft={2} marginTop={0}>
+        <Box flexDirection="column" marginLeft={11} marginTop={0}>
           {stdout
             .trim()
             .split("\n")
             .slice(0, 15)
             .map((line, i) => (
-              <Text key={i} color="gray">
-                {"  "}{line}
+              <Text key={i} dimColor>
+                {line}
               </Text>
             ))}
           {stdout.trim().split("\n").length > 15 && (
-            <Text color="gray" dimColor>
-              {"  "}... ({stdout.trim().split("\n").length - 15} more lines)
+            <Text dimColor>
+              ... ({stdout.trim().split("\n").length - 15} more lines)
             </Text>
           )}
         </Box>
       )}
 
       {stderr && stderr.trim() && (
-        <Box flexDirection="column" marginLeft={2}>
+        <Box flexDirection="column" marginLeft={11}>
           {stderr
             .trim()
             .split("\n")
             .slice(0, 10)
             .map((line, i) => (
               <Text key={i} color={status === "error" ? "red" : "yellow"}>
-                {"  "}{line}
+                {line}
               </Text>
             ))}
         </Box>

@@ -109,18 +109,34 @@ function getToolResultSummary(toolName: string, result: unknown): string {
 
   switch (toolName) {
     case "read_file":
-      return `${r.lines} lines, ${r.size} bytes`;
+      return r.lines != null && r.size != null
+        ? `${r.lines} lines, ${r.size} bytes`
+        : "done";
     case "write_file":
-      return `${r.isNew ? "Created" : "Updated"}: ${r.path}`;
+      return r.path != null
+        ? `${r.isNew ? "Created" : "Updated"}: ${r.path}`
+        : "done";
     case "edit_file":
-      return `${r.linesChanged} lines changed`;
+      return r.linesChanged != null
+        ? `${r.linesChanged} lines changed`
+        : "done";
     case "list_files": {
-      const lf = r as { files: string[]; directories: string[] };
-      return `${lf.files.length} files, ${lf.directories.length} dirs`;
+      const entries = r.entries as string[] | undefined;
+      const files = r.files as string[] | undefined;
+      const dirs = r.directories as string[] | undefined;
+      if (entries) {
+        return `${entries.length} items`;
+      } else if (files && dirs) {
+        return `${files.length} files, ${dirs.length} dirs`;
+      }
+      return "done";
     }
     case "run_command": {
-      const rc = r as { exitCode: number; duration: number };
-      return `exit ${rc.exitCode} (${rc.duration}ms)`;
+      const exitCode = r.exitCode as number | undefined;
+      const duration = r.duration as number | undefined;
+      return exitCode != null && duration != null
+        ? `exit ${exitCode} (${duration}ms)`
+        : "done";
     }
     default:
       return "done";

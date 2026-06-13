@@ -7,6 +7,11 @@ A powerful CLI-based coding agent with multi-provider LLM support (OpenRouter, G
 - **Multi-Provider Support**: Seamlessly switch between OpenRouter, Groq, and NVIDIA APIs.
 - **Interactive Shell**: Interactive terminal chat interface with commands (`/help`, `/model`, `/clear`, `/tokens`).
 - **Tool System**: The agent has access to various tools to read, write, edit files, and execute shell commands inside your workspace.
+- **Rich Terminal UI**: Built with React Ink, featuring live previews, status bars, loading spinners, and an interactive command menu.
+- **Smart @Mentions**: Type `@` followed by a filename to fuzzy-search and instantly include file contents in your context.
+- **Context Management**: Built-in token counting and context window management to prevent context overflows.
+- **Markdown & Syntax Highlighting**: Beautifully formatted terminal outputs with fully rendered markdown and code syntax highlighting (`marked` & `cli-highlight`).
+- **Permission System**: Built-in permission prompts for safe execution of commands and file modifications.
 
 ### Available Tools
 
@@ -25,16 +30,18 @@ A powerful CLI-based coding agent with multi-provider LLM support (OpenRouter, G
 
 ## Project Structure
 
-```
+```text
 cli-agent/
 ├── .env                          # Environment variables (API keys)
 ├── .env.example                  # Example environment file
 ├── .gitignore
 ├── package.json
+├── package-lock.json
 ├── tsconfig.json
 ├── tsup.config.ts                # Build configuration
-├── test.txt
+├── vitest.config.ts              # Vitest test configuration
 ├── dist/                         # Compiled output
+├── tests/                        # Unit and integration tests
 ├── src/
 │   ├── index.ts                  # Entry point
 │   ├── commands/

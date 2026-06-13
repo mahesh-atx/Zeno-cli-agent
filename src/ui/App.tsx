@@ -560,29 +560,41 @@ export function App() {
             } else {
               switch (toolName) {
                 case "read_file":
-                  resultSummary = `${r.lines} lines (${r.size} bytes)`;
+                  resultSummary = r.lines != null && r.size != null
+                    ? `${r.lines} lines (${r.size} bytes)`
+                    : "done";
                   break;
                 case "write_file":
-                  resultSummary = `${r.isNew ? "Created" : "Updated"} → ${r.bytesWritten} bytes`;
+                  resultSummary = r.path != null
+                    ? `${r.isNew ? "Created" : "Updated"} → ${r.bytesWritten} bytes`
+                    : "done";
                   break;
                 case "edit_file":
-                  resultSummary = `${r.linesChanged} lines changed`;
+                  resultSummary = r.linesChanged != null
+                    ? `${r.linesChanged} lines changed`
+                    : "done";
                   break;
                 case "list_files": {
-                  const lf = r as { files: string[]; directories: string[] };
-                  resultSummary = `${lf.files.length} files, ${lf.directories.length} dirs`;
+                  const entries = r.entries as string[] | undefined;
+                  const files = r.files as string[] | undefined;
+                  const dirs = r.directories as string[] | undefined;
+                  if (entries) {
+                    resultSummary = `${entries.length} items`;
+                  } else if (files && dirs) {
+                    resultSummary = `${files.length} files, ${dirs.length} dirs`;
+                  } else {
+                    resultSummary = "done";
+                  }
                   break;
                 }
                 case "run_command": {
-                  const rc = r as {
-                    exitCode: number;
-                    duration: number;
-                    stdout?: string;
-                    stderr?: string;
-                  };
-                  resultSummary = `exit ${rc.exitCode} (${rc.duration}ms)`;
-                  stdout = rc.stdout;
-                  stderr = rc.stderr;
+                  const exitCode = r.exitCode as number | undefined;
+                  const duration = r.duration as number | undefined;
+                  resultSummary = exitCode != null && duration != null
+                    ? `exit ${exitCode} (${duration}ms)`
+                    : "done";
+                  stdout = r.stdout as string | undefined;
+                  stderr = r.stderr as string | undefined;
                   break;
                 }
                 default:

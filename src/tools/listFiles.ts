@@ -2,141 +2,85 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
-
 export const ListFilesSchema = z.object({
-  path: z
-    .string()
-    .optional()
-    .describe("Directory to list. Defaults to current working directory."),
-  recursive: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe("Whether to list files recursively in subdirectories"),
+  path: z.string().optional().default(".").describe("Directory path to list"),
 });
 
 export type ListFilesInput = z.infer<typeof ListFilesSchema>;
 
-// ─── Output ───────────────────────────────────────────────────────────────────
-
-export interface ListFilesOutput {
-  success: true;
-  files: string[];
-  directories: string[];
-  total: number;
-  path: string;
-}
-
-export interface ListFilesError {
-  success: false;
-  error: string;
-  path: string;
-}
-
-export type ListFilesResult = ListFilesOutput | ListFilesError;
-
-// ─── Ignored Directories ──────────────────────────────────────────────────────
-
+// Directories to ALWAYS ignore to protect the context window
 const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  ".next",
-  ".nuxt",
-  "build",
-  "coverage",
-  "__pycache__",
-  ".pytest_cache",
-  "target",         // Rust
-  ".cargo",
+  "node_modules", ".git", ".next", ".nuxt", "dist", "build", 
+  ".venv", "venv", "__pycache__", ".cache", ".idea", ".vscode",
+  ".turbo", ".expo", "coverage"
 ]);
 
-// ─── Recursive Walker ─────────────────────────────────────────────────────────
-
-function walkDir(
-  dir: string,
-  baseDir: string,
-  files: string[],
-  directories: string[],
-  recursive: boolean
-): void {
-  let entries: fs.Dirent[];
-
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    const relativePath = path.relative(baseDir, fullPath);
-
-    if (entry.isDirectory()) {
-      if (IGNORED_DIRS.has(entry.name)) continue;
-
-      directories.push(relativePath);
-
-      if (recursive) {
-        walkDir(fullPath, baseDir, files, directories, recursive);
-      }
-    } else if (entry.isFile()) {
-      files.push(relativePath);
-    }
-  }
+export interface ListFilesResult {
+  success: true;
+  path: string;
+  entries: string[];
+  hints?: string[];
 }
 
-// ─── Execute ──────────────────────────────────────────────────────────────────
-
 export async function listFiles(input: ListFilesInput): Promise<ListFilesResult> {
-  const targetPath = input.path ?? ".";
-  const resolved = path.resolve(process.cwd(), targetPath);
+  const resolved = path.resolve(process.cwd(), input.path);
 
   try {
     const stat = fs.statSync(resolved);
-
     if (!stat.isDirectory()) {
       return {
-        success: false,
-        error: `Path is not a directory: ${targetPath}`,
-        path: targetPath,
+        success: true,
+        path: input.path,
+        entries: [],
+        hints: [`Path '${input.path}' is a file, not a directory. Use 'read_file' instead.`]
       };
     }
-  } catch (error) {
-    if (error instanceof Error) {
-      const nodeError = error as NodeJS.ErrnoException;
 
-      if (nodeError.code === "ENOENT") {
-        return {
-          success: false,
-          error: `Directory not found: ${targetPath}`,
-          path: targetPath,
-        };
+    const rawEntries = fs.readdirSync(resolved, { withFileTypes: true });
+    const formattedEntries: string[] = [];
+
+    // Sort: Directories first, then files
+    const dirs = rawEntries.filter(e => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+    const files = rawEntries.filter(e => e.isFile()).sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const dir of dirs) {
+      if (IGNORED_DIRS.has(dir.name)) continue; // Skip junk
+      formattedEntries.push(`[DIR]  ${dir.name}/`);
+    }
+
+    for (const file of files) {
+      try {
+        const filePath = path.join(resolved, file.name);
+        const stats = fs.statSync(filePath);
+        const sizeKb = (stats.size / 1024).toFixed(1);
+        formattedEntries.push(`[FILE] ${file.name} (${sizeKb} KB)`);
+      } catch {
+        formattedEntries.push(`[FILE] ${file.name}`);
       }
     }
 
+    // MODERN AGENT GUARDRAIL: Limit output to prevent context overflow
+    const MAX_ENTRIES = 100;
+    const hints: string[] = [];
+    
+    if (formattedEntries.length > MAX_ENTRIES) {
+      hints.push(`Directory contains ${formattedEntries.length} items. Only showing the first ${MAX_ENTRIES}. Be specific with your paths instead of listing the root directory.`);
+    }
+
     return {
-      success: false,
-      error: `Cannot access directory: ${targetPath}`,
-      path: targetPath,
+      success: true,
+      path: input.path,
+      entries: formattedEntries.slice(0, MAX_ENTRIES),
+      ...(hints.length > 0 && { hints })
+    };
+
+  } catch (error: any) {
+    // Handle ENOENT gracefully
+    return {
+      success: true,
+      path: input.path,
+      entries: [],
+      hints: [`Directory '${input.path}' does not exist. Check your path and try again.`]
     };
   }
-
-  const files: string[] = [];
-  const directories: string[] = [];
-
-  walkDir(resolved, resolved, files, directories, input.recursive ?? false);
-
-  // Sort alphabetically
-  files.sort();
-  directories.sort();
-
-  return {
-    success: true,
-    files,
-    directories,
-    total: files.length + directories.length,
-    path: targetPath,
-  };
 }

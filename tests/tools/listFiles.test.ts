@@ -20,36 +20,22 @@ afterEach(() => {
 // ━━━ listFiles ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("listFiles tool", () => {
-  it("lists files and directories non-recursively", async () => {
-    fs.writeFileSync(path.join(tmpDir, "a.txt"), "");
+  it("lists files and directories with correct formatting", async () => {
+    fs.writeFileSync(path.join(tmpDir, "a.txt"), "hello");
     fs.mkdirSync(path.join(tmpDir, "b-dir"));
     fs.writeFileSync(path.join(tmpDir, "b-dir", "nested.txt"), "");
 
     const rel = path.relative(process.cwd(), tmpDir);
-    const result = await listFiles({ path: rel, recursive: false });
+    const result = await listFiles({ path: rel });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.files).toContain("a.txt");
-      expect(result.files).not.toContain(path.join("b-dir", "nested.txt"));
-      expect(result.directories).toContain("b-dir");
-    }
-  });
-
-  it("lists files recursively", async () => {
-    fs.writeFileSync(path.join(tmpDir, "a.txt"), "");
-    fs.mkdirSync(path.join(tmpDir, "b-dir"));
-    fs.writeFileSync(path.join(tmpDir, "b-dir", "nested.txt"), "");
-
-    const rel = path.relative(process.cwd(), tmpDir);
-    const result = await listFiles({ path: rel, recursive: true });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.files).toContain("a.txt");
-      // Use standard path join for cross-platform comparison
-      expect(result.files).toContain(path.join("b-dir", "nested.txt"));
-      expect(result.directories).toContain("b-dir");
+      // Directories should come first, then files
+      expect(result.entries.length).toBeGreaterThanOrEqual(2);
+      expect(result.entries.some(e => e.includes("[DIR]  b-dir/"))).toBe(true);
+      expect(result.entries.some(e => e.includes("[FILE] a.txt"))).toBe(true);
+      // Nested files should not be listed (non-recursive by design now)
+      expect(result.entries.some(e => e.includes("nested.txt"))).toBe(false);
     }
   });
 
@@ -61,38 +47,39 @@ describe("listFiles tool", () => {
     fs.writeFileSync(path.join(tmpDir, "a.txt"), "");
 
     const rel = path.relative(process.cwd(), tmpDir);
-    const result = await listFiles({ path: rel, recursive: true });
+    const result = await listFiles({ path: rel });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.files).toContain("a.txt");
-      expect(result.directories).not.toContain("node_modules");
-      expect(result.directories).not.toContain(".git");
-      expect(result.files).not.toContain(path.join("node_modules", "ignored.txt"));
+      expect(result.entries.some(e => e.includes("[FILE] a.txt"))).toBe(true);
+      expect(result.entries.some(e => e.includes("node_modules"))).toBe(false);
+      expect(result.entries.some(e => e.includes(".git"))).toBe(false);
     }
   });
 
-  it("returns error if path is not a directory", async () => {
+  it("returns soft error (success: true) with hints if path is not a directory", async () => {
     const file = path.join(tmpDir, "file.txt");
     fs.writeFileSync(file, "");
     
     const rel = path.relative(process.cwd(), file);
-    const result = await listFiles({ path: rel, recursive: false });
+    const result = await listFiles({ path: rel });
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error).toContain("Path is not a directory");
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.entries.length).toBe(0);
+      expect(result.hints?.[0]).toContain("is a file, not a directory");
     }
   });
 
-  it("returns error if directory does not exist", async () => {
+  it("returns soft error (success: true) with hints if directory does not exist", async () => {
     const p = path.join(tmpDir, "nonexistent");
     const rel = path.relative(process.cwd(), p);
-    const result = await listFiles({ path: rel, recursive: false });
+    const result = await listFiles({ path: rel });
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error).toContain("Directory not found");
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.entries.length).toBe(0);
+      expect(result.hints?.[0]).toContain("does not exist");
     }
   });
 });

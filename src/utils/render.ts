@@ -1,7 +1,31 @@
 import { marked } from "marked";
 import TerminalRenderer from "marked-terminal";
 import { highlight } from "cli-highlight";
-import chalk from "chalk";
+
+// ─── Simple ANSI Color Helper ─────────────────────────────────────────────────
+// Replaces 'chalk' with zero dependencies by using standard ANSI escape codes.
+
+const ansi = {
+  bold: (t: string) => `\x1b[1m${t}\x1b[22m`,
+  dim: (t: string) => `\x1b[2m${t}\x1b[22m`,
+  italic: (t: string) => `\x1b[3m${t}\x1b[23m`,
+  underline: (t: string) => `\x1b[4m${t}\x1b[24m`,
+  red: (t: string) => `\x1b[31m${t}\x1b[39m`,
+  green: (t: string) => `\x1b[32m${t}\x1b[39m`,
+  yellow: (t: string) => `\x1b[33m${t}\x1b[39m`,
+  blue: (t: string) => `\x1b[34m${t}\x1b[39m`,
+  magenta: (t: string) => `\x1b[35m${t}\x1b[39m`,
+  cyan: (t: string) => `\x1b[36m${t}\x1b[39m`,
+  white: (t: string) => `\x1b[37m${t}\x1b[39m`,
+  bgGrayWhite: (t: string) => `\x1b[100m\x1b[37m${t}\x1b[39m\x1b[49m`,
+  cyanBold: (t: string) => `\x1b[36m\x1b[1m${t}\x1b[22m\x1b[39m`,
+  blueBold: (t: string) => `\x1b[34m\x1b[1m${t}\x1b[22m\x1b[39m`,
+  greenBold: (t: string) => `\x1b[32m\x1b[1m${t}\x1b[22m\x1b[39m`,
+  yellowBold: (t: string) => `\x1b[33m\x1b[1m${t}\x1b[22m\x1b[39m`,
+  magentaBold: (t: string) => `\x1b[35m\x1b[1m${t}\x1b[22m\x1b[39m`,
+  cyanUnderline: (t: string) => `\x1b[36m\x1b[4m${t}\x1b[24m\x1b[39m`,
+  dimItalic: (t: string) => `\x1b[2m\x1b[3m${t}\x1b[23m\x1b[22m`,
+};
 
 // ─── Setup Marked with Terminal Renderer ──────────────────────────────────────
 
@@ -12,41 +36,41 @@ const renderer = new TerminalRenderer({
   },
   // Inline code
   codespan: (code: string) => {
-    return chalk.bgGray.white(` ${code} `);
+    return ansi.bgGrayWhite(` ${code} `);
   },
   // Headers
   heading: (text: string, level: number) => {
     const colors = [
-      chalk.cyan.bold,
-      chalk.blue.bold,
-      chalk.green.bold,
-      chalk.yellow.bold,
+      ansi.cyanBold,
+      ansi.blueBold,
+      ansi.greenBold,
+      ansi.yellowBold,
     ];
     const color = colors[Math.min(level - 1, colors.length - 1)];
     const prefix = "#".repeat(level);
     return `\n${color(`${prefix} ${text}`)}\n`;
   },
   // Bold
-  strong: (text: string) => chalk.bold(text),
+  strong: (text: string) => ansi.bold(text),
   // Italic
-  em: (text: string) => chalk.italic(text),
+  em: (text: string) => ansi.italic(text),
   // Links
   link: (_href: string, _title: string | null, text: string) => {
-    return chalk.cyan.underline(text);
+    return ansi.cyanUnderline(text);
   },
   // List items
   listitem: (text: string) => {
-    return `  ${chalk.cyan("•")} ${text}\n`;
+    return `  ${ansi.cyan("•")} ${text}\n`;
   },
   // Blockquote
   blockquote: (text: string) => {
     return text
       .split("\n")
-      .map((line) => chalk.dim(`│ ${line}`))
+      .map((line) => ansi.dim(`│ ${line}`))
       .join("\n");
   },
   // Horizontal rule
-  hr: () => chalk.dim("─".repeat(60)) + "\n",
+  hr: () => ansi.dim("─".repeat(60)) + "\n",
   // Paragraph
   paragraph: (text: string) => `${text}\n`,
   // Table
@@ -64,9 +88,9 @@ const renderer = new TerminalRenderer({
 
 export function renderCodeBlock(code: string, lang: string): string {
   const width = Math.min(process.stdout.columns ?? 80, 100);
-  const border = chalk.dim("─".repeat(width));
+  const border = ansi.dim("─".repeat(width));
   const langLabel = lang
-    ? chalk.dim.italic(` ${lang}`)
+    ? ansi.dimItalic(` ${lang}`)
     : "";
 
   let highlighted: string;
@@ -77,27 +101,27 @@ export function renderCodeBlock(code: string, lang: string): string {
         language: lang,
         ignoreIllegals: true,
         theme: {
-          keyword: chalk.cyan,
-          built_in: chalk.blue,
-          string: chalk.green,
-          number: chalk.yellow,
-          comment: chalk.dim,
-          function: chalk.magenta,
-          title: chalk.magenta.bold,
-          params: chalk.white,
-          type: chalk.blue,
-          literal: chalk.yellow,
-          variable: chalk.white,
-          attr: chalk.cyan,
-          meta: chalk.dim,
+          keyword: ansi.cyan,
+          built_in: ansi.blue,
+          string: ansi.green,
+          number: ansi.yellow,
+          comment: ansi.dim,
+          function: ansi.magenta,
+          title: ansi.magentaBold,
+          params: ansi.white,
+          type: ansi.blue,
+          literal: ansi.yellow,
+          variable: ansi.white,
+          attr: ansi.cyan,
+          meta: ansi.dim,
         },
       });
     } else {
-      highlighted = chalk.white(code);
+      highlighted = ansi.white(code);
     }
   } catch {
     // Fall back to plain text if language is not supported
-    highlighted = chalk.white(code);
+    highlighted = ansi.white(code);
   }
 
   // Add line numbers
@@ -105,7 +129,7 @@ export function renderCodeBlock(code: string, lang: string): string {
   const lineNumberWidth = String(lines.length).length;
 
   const numberedLines = lines.map((line, idx) => {
-    const lineNum = chalk.dim(
+    const lineNum = ansi.dim(
       String(idx + 1).padStart(lineNumberWidth, " ")
     );
     return `${lineNum}  ${line}`;
@@ -140,7 +164,7 @@ export function renderStreaming(text: string): string {
   // During streaming we do lightweight rendering
   // Replace inline code with highlighted version
   return text.replace(/`([^`]+)`/g, (_, code) => {
-    return chalk.bgGray.white(` ${code} `);
+    return ansi.bgGrayWhite(` ${code} `);
   });
 }
 
@@ -148,13 +172,13 @@ export function renderStreaming(text: string): string {
 
 export function renderDiffLine(line: string): string {
   if (line.startsWith("+")) {
-    return chalk.green(line);
+    return ansi.green(line);
   }
   if (line.startsWith("-")) {
-    return chalk.red(line);
+    return ansi.red(line);
   }
   if (line.startsWith("@@")) {
-    return chalk.cyan(line);
+    return ansi.cyan(line);
   }
-  return chalk.dim(line);
+  return ansi.dim(line);
 }
