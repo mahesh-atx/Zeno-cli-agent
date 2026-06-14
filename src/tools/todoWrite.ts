@@ -72,7 +72,7 @@ export async function todoWrite(input: TodoWriteInput): Promise<TodoWriteResult>
       };
     }
     const newTask: TodoTask = {
-      id: `task_${Date.now()}`,
+      id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       title: input.title,
       status: "pending",
       createdAt: new Date().toISOString(),

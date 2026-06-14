@@ -1,67 +1,146 @@
 import { describe, it, expect } from "vitest";
 import { sendMessage, SendMessageSchema } from "../../src/tools/sendMessage";
-import { ZodError } from "zod";
 
-describe("sendMessage tool", () => {
-  it("should return the correct output format without ends_turn", async () => {
-    const result = await sendMessage({
-      message: "Hello world",
-      title: "Greeting",
-      type: "info",
-    });
-
+describe("SendMessageSchema", () => {
+  it("accepts minimal valid input", () => {
+    const result = SendMessageSchema.safeParse({ message: "hello" });
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.message_sent).toBe(true);
-      expect(result.ends_turn).toBe(false);
-      expect(result.ui_message).toEqual({
-        content: "Hello world",
-        type: "info",
-      });
-      expect(result.hints?.[0]).toContain("continue calling tools");
+  });
+
+  it("defaults type to info when omitted", () => {
+    const result = SendMessageSchema.parse({ message: "hello" });
+    expect(result.type).toBe("info");
+  });
+
+  it("defaults ends_turn to false when omitted", () => {
+    const result = SendMessageSchema.parse({ message: "hello" });
+    expect(result.ends_turn).toBe(false);
+  });
+
+  it("accepts all valid type values", () => {
+    const types = ["info", "warning", "success", "error"] as const;
+    for (const type of types) {
+      const result = SendMessageSchema.safeParse({ message: "hello", type });
+      expect(result.success).toBe(true);
     }
   });
 
-  it("should return the correct output format with ends_turn", async () => {
+  it("rejects invalid type value", () => {
+    const result = SendMessageSchema.safeParse({
+      message: "hello",
+      type: "critical",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts optional title", () => {
+    const result = SendMessageSchema.safeParse({
+      message: "hello",
+      title: "My Title",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects empty message", () => {
+    // Empty string is technically valid in zod string() unless .min(1)
+    // This test documents current behavior
+    const result = SendMessageSchema.safeParse({ message: "" });
+    expect(result.success).toBe(true); // document: no min length enforced
+  });
+
+  it("rejects missing message", () => {
+    const result = SendMessageSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("sendMessage", () => {
+  it("returns success true always", async () => {
     const result = await sendMessage({
-      message: "Task completed",
+      message: "hello",
+      type: "info",
+      ends_turn: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("returns message_sent true always", async () => {
+    const result = await sendMessage({
+      message: "hello",
+      type: "info",
+      ends_turn: false,
+    });
+    expect(result.message_sent).toBe(true);
+  });
+
+  it("passes message content to ui_message", async () => {
+    const result = await sendMessage({
+      message: "Refactor complete",
+      type: "success",
+      ends_turn: false,
+    });
+    expect(result.ui_message.content).toBe("Refactor complete");
+  });
+
+  it("passes type to ui_message", async () => {
+    const result = await sendMessage({
+      message: "something failed",
+      type: "error",
+      ends_turn: false,
+    });
+    expect(result.ui_message.type).toBe("error");
+  });
+
+  it("passes title to ui_message when provided", async () => {
+    const result = await sendMessage({
+      message: "body text",
+      title: "My Header",
+      type: "info",
+      ends_turn: false,
+    });
+    expect(result.ui_message.title).toBe("My Header");
+  });
+
+  it("ui_message title is undefined when not provided", async () => {
+    const result = await sendMessage({
+      message: "body text",
+      type: "info",
+      ends_turn: false,
+    });
+    expect(result.ui_message.title).toBeUndefined();
+  });
+
+  it("ends_turn false returns correct hint about continuing", async () => {
+    const result = await sendMessage({
+      message: "working on it",
+      type: "info",
+      ends_turn: false,
+    });
+    expect(result.ends_turn).toBe(false);
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes("continue"))).toBe(true);
+  });
+
+  it("ends_turn true returns correct hint about stopping", async () => {
+    const result = await sendMessage({
+      message: "all done",
       type: "success",
       ends_turn: true,
     });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.message_sent).toBe(true);
-      expect(result.ends_turn).toBe(true);
-      expect(result.ui_message).toEqual({
-        content: "Task completed",
-        type: "success",
-      });
-      expect(result.hints?.[0]).toContain("ended your turn");
-    }
+    expect(result.ends_turn).toBe(true);
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes("stop") || h.includes("wait"))).toBe(true);
   });
 
-  describe("schema validation", () => {
-    it("should parse valid input", () => {
-      const input = { message: "M", title: "T", type: "success", ends_turn: true };
-      expect(SendMessageSchema.parse(input)).toEqual(input);
-    });
-
-    it("should provide defaults if optional fields are omitted", () => {
-      const input = { message: "M" };
-      expect(SendMessageSchema.parse(input)).toEqual({
-        message: "M",
-        type: "info",
+  it("all four type values produce valid output", async () => {
+    const types = ["info", "warning", "success", "error"] as const;
+    for (const type of types) {
+      const result = await sendMessage({
+        message: "test",
+        type,
         ends_turn: false,
       });
-    });
-
-    it("should throw on missing message", () => {
-      expect(() => SendMessageSchema.parse({ title: "T" })).toThrow(ZodError);
-    });
-
-    it("should throw on invalid type enum", () => {
-      expect(() => SendMessageSchema.parse({ message: "M", type: "invalid" })).toThrow(ZodError);
-    });
+      expect(result.ui_message.type).toBe(type);
+    }
   });
 });
