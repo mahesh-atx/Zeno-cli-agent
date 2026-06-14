@@ -7,6 +7,7 @@ import type { AgentEvent } from "../errors/base";
 import { chatWithOpenRouter } from "./openrouter";
 import { chatWithGroq, GROQ_MODELS, GROQ_DEFAULT_MODEL } from "./groq";
 import { chatWithNvidia, NVIDIA_MODELS, NVIDIA_DEFAULT_MODEL } from "./nvidia";
+import { chatWithOpenCodeZen, OPENCODEZEN_MODELS, OPENCODEZEN_DEFAULT_MODEL } from "./opencodezen";
 
 // ─── Model Registry ───────────────────────────────────────────
 
@@ -21,12 +22,14 @@ export const PROVIDER_MODELS: Record<ProviderName, readonly string[]> = {
   ],
   groq: GROQ_MODELS,
   nvidia: NVIDIA_MODELS,
+  opencodezen: OPENCODEZEN_MODELS,
 };
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderName, string> = {
   openrouter: "openai/gpt-4o-mini",
   groq: GROQ_DEFAULT_MODEL,
   nvidia: NVIDIA_DEFAULT_MODEL,
+  opencodezen: OPENCODEZEN_DEFAULT_MODEL,
 };
 
 // ─── Provider Factory ─────────────────────────────────────────
@@ -49,6 +52,10 @@ export function getProvider(
     case "nvidia":
       return (messages, model, attempt = 1) =>
         chatWithNvidia(messages, model, config, attempt);
+
+    case "opencodezen":
+      return (messages, model, attempt = 1) =>
+        chatWithOpenCodeZen(messages, model, config, attempt);
 
     default: {
       const _exhaustive: never = providerName;

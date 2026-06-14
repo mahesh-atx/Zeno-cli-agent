@@ -6,13 +6,14 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ProviderName = "openrouter" | "groq" | "nvidia";
+export type ProviderName = "openrouter" | "groq" | "nvidia" | "opencodezen";
 
 export interface Config {
   // API Keys
   openrouterApiKey: string | null;
   groqApiKey: string | null;
   nvidiaApiKey: string | null;
+  opencodezenApiKey: string | null;
 
   // Provider + Model
   defaultProvider: ProviderName;
@@ -25,7 +26,7 @@ export interface Config {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-const VALID_PROVIDERS: ProviderName[] = ["openrouter", "groq", "nvidia"];
+const VALID_PROVIDERS: ProviderName[] = ["openrouter", "groq", "nvidia", "opencodezen"];
 
 function isValidProvider(value: string): value is ProviderName {
   return VALID_PROVIDERS.includes(value as ProviderName);
@@ -51,14 +52,16 @@ function validateConfig(config: Config): void {
   const hasAnyKey =
     config.openrouterApiKey !== null ||
     config.groqApiKey !== null ||
-    config.nvidiaApiKey !== null;
+    config.nvidiaApiKey !== null ||
+    config.opencodezenApiKey !== null;
 
   if (!hasAnyKey) {
     errors.push(
       "No API keys found. Add at least one of the following to your .env file:\n" +
       "  - OPENROUTER_API_KEY\n" +
       "  - GROQ_API_KEY\n" +
-      "  - NVIDIA_API_KEY"
+      "  - NVIDIA_API_KEY\n" +
+      "  - OPENCODEZEN_API_KEY"
     );
   }
 
@@ -67,6 +70,7 @@ function validateConfig(config: Config): void {
     openrouter: config.openrouterApiKey,
     groq: config.groqApiKey,
     nvidia: config.nvidiaApiKey,
+    opencodezen: config.opencodezenApiKey,
   };
 
   if (hasAnyKey && providerKeyMap[config.defaultProvider] === null) {
@@ -91,7 +95,7 @@ function loadConfig(): Config {
   if (!isValidProvider(rawProvider)) {
     console.error(
       `✗ Invalid DEFAULT_PROVIDER: "${rawProvider}"\n` +
-      `  Valid options: openrouter, groq, nvidia`
+      `  Valid options: openrouter, groq, nvidia, opencodezen`
     );
     process.exit(1);
   }
@@ -100,6 +104,7 @@ function loadConfig(): Config {
     openrouterApiKey: process.env.OPENROUTER_API_KEY || null,
     groqApiKey: process.env.GROQ_API_KEY || null,
     nvidiaApiKey: process.env.NVIDIA_API_KEY || null,
+    opencodezenApiKey: process.env.OPENCODEZEN_API_KEY || null,
     defaultProvider: rawProvider,
     defaultModel: process.env.DEFAULT_MODEL ?? "openai/gpt-4o-mini",
     temperature: readNumber("TEMPERATURE", 0.7),

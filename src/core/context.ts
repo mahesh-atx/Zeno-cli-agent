@@ -37,6 +37,7 @@ export const TOKEN_LIMITS: Record<string, number> = {
   openrouter: 128000,
   groq:        32768,
   nvidia:     128000,
+  opencodezen: 128000,
 };
 
 // Truncation fires at 85% of limit

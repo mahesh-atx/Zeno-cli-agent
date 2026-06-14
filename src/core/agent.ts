@@ -94,6 +94,14 @@ function buildProviderModel(provider: ProviderName, model: string) {
       });
       return client(model);
     }
+    case "opencodezen": {
+      if (!config.opencodezenApiKey) throw new Error("OPENCODEZEN_API_KEY is not set.");
+      const client = createOpenAI({
+        apiKey: config.opencodezenApiKey,
+        baseURL: "https://opencode.ai/zen/v1",
+      });
+      return client(model);
+    }
     default: {
       const _e: never = provider;
       throw new Error(`Unknown provider: ${_e}`);
