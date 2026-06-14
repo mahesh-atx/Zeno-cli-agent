@@ -74,6 +74,13 @@ export class Conversation {
         "    - NEVER guess critical architectural decisions.",
         "14. To communicate progress without ending your turn:",
         "    - Use send_message to push updates to the user while you continue working.",
+        "15. For large refactors touching multiple files simultaneously:",
+        "    - Use apply_patch with a standard unified diff.",
+        "    - Generate the diff by reading each file first, then writing",
+        "      the patch in --- a/file +++ b/file @@ format.",
+        "    - Use dryRun: true first to validate before applying.",
+        "    - Prefer apply_patch over multiple edit_file calls when",
+        "      changing more than 10 lines across more than 1 file.",
       ].join("\n");
     this.baseSystemPrompt = base;
     this.systemPrompt = base;

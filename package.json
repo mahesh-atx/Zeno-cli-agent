@@ -10,7 +10,10 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run tests/",
+    "test:unit": "vitest run tests/tools tests/core tests/errors",
+    "test:llm": "vitest run tests/integration/llm-tools.test.ts --reporter=verbose",
+    "test:llm:watch": "vitest tests/integration/llm-tools.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@ai-sdk/groq": "^1.2.9",
@@ -19,6 +22,7 @@
     "chalk": "^4.1.2",
     "cheerio": "^1.2.0",
     "cli-highlight": "^2.1.11",
+    "diff": "^9.0.0",
     "dotenv": "^16.4.7",
     "execa": "^5.1.1",
     "fast-glob": "^3.3.3",
@@ -34,6 +38,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22.15.3",
     "@types/react": "^18.3.1",

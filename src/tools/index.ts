@@ -15,6 +15,8 @@ import { DeleteFileSchema, deleteFile } from "./deleteFile";
 import { TodoWriteSchema, todoWrite } from "./todoWrite";
 import { AskQuestionSchema, askQuestion } from "./askQuestion";
 import { SendMessageSchema, sendMessage } from "./sendMessage";
+import { ApplyPatchSchema, applyPatch } from "./applyPatch";
+
 // ━━━ Tool Definition ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface ToolDefinition {
@@ -204,6 +206,19 @@ export const TOOLS: ToolDefinition[] = [
     execute: wrapExecute("send_message", async (input) => {
       const parsed = SendMessageSchema.parse(input);
       return sendMessage(parsed);
+    }),
+  },
+  {
+    name: "apply_patch",
+    description:
+      "Apply a unified diff patch to one or more files simultaneously. " +
+      "Use this for large refactors touching multiple files where edit_file " +
+      "would be too brittle. Supports fuzzy context matching up to 15 lines " +
+      "of drift. Use dryRun: true to validate before applying.",
+    schema: ApplyPatchSchema,
+    execute: wrapExecute("apply_patch", async (input) => {
+      const parsed = ApplyPatchSchema.parse(input);
+      return applyPatch(parsed);
     }),
   },
 ];

@@ -36,6 +36,19 @@ A powerful CLI-based coding agent with multi-provider LLM support (OpenRouter, G
 3. Run `npm run build` to build the agent.
 4. Run `node dist/index.js` to start the interactive agent.
 
+## Testing
+
+This project uses [Vitest](https://vitest.dev/) for testing. The test suite is divided into fast unit tests and comprehensive LLM integration tests.
+
+- `npm run test` - Runs all tests.
+- `npm run test:unit` - Runs only the unit tests (core logic, tools, and error handling).
+- `npm run test:llm` - Runs the LLM integration tests against real models.
+- `npm run test:llm:watch` - Runs the LLM integration tests in watch mode.
+
+**Note on LLM Integration Tests:**
+The integration tests interact with real LLM APIs to verify that the agent correctly understands and chains tools together. They require an active API key to run successfully. By default, they use the `groq` provider. 
+If no API key is found in your `.env` file, the integration tests will gracefully skip themselves. You can configure which provider to test against by setting `TEST_PROVIDER` (e.g., `groq`, `openrouter`, or `nvidia`) and `TEST_MODEL` in your `.env`.
+
 ## Project Structure
 
 ```text

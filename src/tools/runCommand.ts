@@ -130,11 +130,15 @@ export async function runCommand(input: RunCommandInput): Promise<RunCommandResu
   const startTime = Date.now();
 
   try {
-    const result = await execa("sh", ["-c", input.command], {
+    const isWindows = process.platform === "win32";
+    const shellOption = isWindows ? true : "/bin/sh";
+
+    const result = await execa(input.command, [], {
       cwd,
       timeout: COMMAND_TIMEOUT_MS,
       reject: false, // Don't throw on non-zero exit
       all: false,
+      shell: shellOption,
     });
 
     const duration = Date.now() - startTime;

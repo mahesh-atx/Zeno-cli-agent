@@ -2,6 +2,7 @@
 import { streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq } from "@ai-sdk/groq";
+import * as path from "path";
 
 import { config } from "./config";
 import type { Conversation } from "./conversation";
@@ -198,10 +199,30 @@ case "delete_file": {
   const turnLabel = endsTurn ? " [ends turn]" : "";
 
   return `${typeIcon} ${preview}${turnLabel}`;
-  // Examples:
-  // ✅ Refactor complete (ends turn)
-  // ⚠️ Could not find config file...
-  // ℹ️ Analyzing 47 files...
+}
+case "apply_patch": {
+  const patches = r.patches as Array<{ path: string; status: string }> | undefined;
+  const applied = patches?.filter(p => p.status === "APPLIED");
+  const failed = patches?.filter(p => p.status !== "APPLIED" && p.status !== "DRY_RUN");
+  
+  if (applied && applied.length > 0) {
+    const fileList = applied.map(p => path.basename(p.path)).join(", ");
+    return `Patches applied: ${fileList} (${applied.length})`;
+  }
+  
+  if (failed && failed.length > 0) {
+    const fileList = failed.map(p => path.basename(p.path)).join(", ");
+    return `Patch failed: ${fileList} (${failed.length})`;
+  }
+  
+  // Dry run or no patches
+  const dryRun = patches?.find(p => p.status === "DRY_RUN");
+  if (dryRun) {
+    const fileList = dryRun.path ? path.basename(dryRun.path) : "unknown";
+    return `Dry run validated: ${fileList}`;
+  }
+  
+  return "patch applied";
 }
     default:
       return "done";
