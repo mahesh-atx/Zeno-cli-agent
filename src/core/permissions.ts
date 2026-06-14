@@ -2,7 +2,7 @@ import { requestPermission } from "./agent";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ActionType = "write_file" | "edit_file" | "run_command";
+export type ActionType = "write_file" | "edit_file" | "run_command" | "web_fetch" | "delete_file" | "todo_write";
 
 export interface PermissionRequest {
   action: ActionType;

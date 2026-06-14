@@ -18,8 +18,16 @@ A powerful CLI-based coding agent with multi-provider LLM support (OpenRouter, G
 - `read_file`: View the contents of a file (optionally a specific line range).
 - `write_file`: Create or overwrite a file with new content.
 - `edit_file`: Replace an exact string in a file with another string.
+- `delete_file`: Safely delete a file or directory.
 - `list_files`: Show files/folders in a directory (recursive optional).
+- `search_files`: Search file contents across the codebase (like grep).
+- `glob_files`: Find files by path pattern.
 - `run_command`: Execute a shell command (e.g., `git status`, `npm install`).
+- `web_search`: Search the web using DuckDuckGo.
+- `web_fetch`: Fetch a specific URL and extract its content as Markdown.
+- `todo_write`: Manage a persistent task list for complex refactors.
+- `ask_question`: Pause execution and ask the user for clarification.
+- `send_message`: Send a formatted progress update to the user.
 
 ## Getting Started
 
@@ -52,6 +60,9 @@ cli-agent/
 │   │   ├── context.ts            # Context window management
 │   │   ├── conversation.ts       # Conversation history
 │   │   └── permissions.ts        # Permission system
+│   ├── errors/
+│   │   ├── base.ts               # Typed event and error definitions
+│   │   └── toolErrors.ts         # Tool error handling utilities
 │   ├── providers/
 │   │   ├── index.ts              # Provider registry
 │   │   ├── groq.ts               # Groq API provider
@@ -59,10 +70,18 @@ cli-agent/
 │   │   └── openrouter.ts         # OpenRouter API provider
 │   ├── tools/
 │   │   ├── index.ts              # Tool registry
+│   │   ├── askQuestion.ts        # ask_question tool
+│   │   ├── deleteFile.ts         # delete_file tool
 │   │   ├── editFile.ts           # edit_file tool
+│   │   ├── globFiles.ts          # glob_files tool
 │   │   ├── listFiles.ts          # list_files tool
 │   │   ├── readFile.ts           # read_file tool
 │   │   ├── runCommand.ts         # run_command tool
+│   │   ├── searchFiles.ts        # search_files tool
+│   │   ├── sendMessage.ts        # send_message tool
+│   │   ├── todoWrite.ts          # todo_write tool
+│   │   ├── webFetch.ts           # web_fetch tool
+│   │   ├── webSearch.ts          # web_search tool
 │   │   └── writeFile.ts          # write_file tool
 │   ├── ui/
 │   │   ├── App.tsx               # React ink app root
@@ -75,6 +94,7 @@ cli-agent/
 │   │   ├── LoadingSpinner.tsx    # Loading indicator
 │   │   ├── MessageItem.tsx       # Single message renderer
 │   │   ├── PermissionPrompt.tsx  # Permission approval UI
+│   │   ├── QuestionPrompt.tsx    # Interactive question UI
 │   │   ├── StatusBar.tsx         # Bottom status bar
 │   │   ├── StatusLine.tsx        # Status line component
 │   │   ├── ToolOutput.tsx        # Tool execution output

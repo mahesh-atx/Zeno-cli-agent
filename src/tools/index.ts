@@ -7,7 +7,14 @@ import { EditFileSchema, editFile } from "./editFile";
 import { ListFilesSchema, listFiles } from "./listFiles";
 import { RunCommandSchema, runCommand } from "./runCommand";
 import { catchToolError } from "../errors/toolErrors";
-
+import { WebSearchSchema, webSearch } from "./webSearch";
+import { WebFetchSchema, webFetch } from "./webFetch";
+import { SearchFilesSchema, searchFiles } from "./searchFiles";
+import { GlobFilesSchema, globFiles } from "./globFiles";
+import { DeleteFileSchema, deleteFile } from "./deleteFile";
+import { TodoWriteSchema, todoWrite } from "./todoWrite";
+import { AskQuestionSchema, askQuestion } from "./askQuestion";
+import { SendMessageSchema, sendMessage } from "./sendMessage";
 // ━━━ Tool Definition ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface ToolDefinition {
@@ -125,6 +132,78 @@ export const TOOLS: ToolDefinition[] = [
     execute: wrapExecute("run_command", async (input) => {
       const parsed = RunCommandSchema.parse(input);
       return runCommand(parsed);
+    }),
+  },
+  {
+    name: "web_search",
+    description: "Search the web using DuckDuckGo. Returns top 5 results with titles, URLs, and snippets. Use this to find documentation, StackOverflow answers, or package information.",
+    schema: WebSearchSchema,
+    execute: wrapExecute("web_search", async (input) => {
+      const parsed = WebSearchSchema.parse(input);
+      return webSearch(parsed);
+    }),
+  },
+  {
+    name: "web_fetch",
+    description: "Fetch a specific URL and extract its content as Markdown. Use this after web_search to read official docs, articles, or tutorials. Blocks binary downloads.",
+    schema: WebFetchSchema,
+    execute: wrapExecute("web_fetch", async (input) => {
+      const parsed = WebFetchSchema.parse(input);
+      return webFetch(parsed);
+    }),
+  },
+  {
+    name: "search_files",
+    description: "Search file contents across the codebase (like grep). Returns matching lines. Use 'isRegex: true' for complex patterns. Automatically ignores node_modules.",
+    schema: SearchFilesSchema,
+    execute: wrapExecute("search_files", async (input) => {
+      const parsed = SearchFilesSchema.parse(input);
+      return searchFiles(parsed);
+    }),
+  },
+  {
+    name: "glob_files",
+    description: "Find files by path pattern (e.g., '**/*.ts', 'src/**/*.test.js'). Returns a list of file paths. Use this to discover where files are located.",
+    schema: GlobFilesSchema,
+    execute: wrapExecute("glob_files", async (input) => {
+      const parsed = GlobFilesSchema.parse(input);
+      return globFiles(parsed);
+    }),
+  },
+  {
+    name: "delete_file",
+    description: "Safely delete a file or directory. Requires 'recursive: true' for directories. Blocks protected paths like node_modules and .git.",
+    schema: DeleteFileSchema,
+    execute: wrapExecute("delete_file", async (input) => {
+      const parsed = DeleteFileSchema.parse(input);
+      return deleteFile(parsed);
+    }),
+  },
+  {
+    name: "todo_write",
+    description: "Manage a persistent task list to track your progress on complex, multi-step refactors. Use 'list' to see current tasks, 'add' to create, 'update' to change status, and 'delete' to remove.",
+    schema: TodoWriteSchema,
+    execute: wrapExecute("todo_write", async (input) => {
+      const parsed = TodoWriteSchema.parse(input);
+      return todoWrite(parsed);
+    }),
+  },
+  {
+    name: "ask_question",
+    description: "Pause your execution and ask the user for clarification. Use this when requirements are ambiguous. The agent loop will stop and wait for the user's reply.",
+    schema: AskQuestionSchema,
+    execute: wrapExecute("ask_question", async (input) => {
+      const parsed = AskQuestionSchema.parse(input);
+      return askQuestion(parsed);
+    }),
+  },
+  {
+    name: "send_message",
+    description: "Send a formatted progress update or notification to the user mid-execution. Set 'ends_turn: true' if this message concludes your work.",
+    schema: SendMessageSchema,
+    execute: wrapExecute("send_message", async (input) => {
+      const parsed = SendMessageSchema.parse(input);
+      return sendMessage(parsed);
     }),
   },
 ];

@@ -12,7 +12,9 @@ export type AgentEventKind =
   | "network_error"
   | "server_error"
   | "tool_error"
-  | "unknown_error";
+  | "unknown_error"
+  | "agent_paused"
+  | "agent_turn_end";
 
 // ─── Base Typed Event ─────────────────────────────────────────
 
@@ -78,6 +80,21 @@ export interface UnknownErrorEvent extends BaseAgentEvent {
   requiresUserAction: true;
 }
 
+export interface AgentPausedEvent extends BaseAgentEvent {
+  kind: "agent_paused";
+  retryable: false;
+  requiresUserAction: true;
+  question: string;
+  options?: string[];
+}
+
+export interface AgentTurnEndEvent extends BaseAgentEvent {
+  kind: "agent_turn_end";
+  retryable: false;
+  requiresUserAction: false;
+  uiMessage: { title?: string; content: string; type: string };
+}
+
 // ─── Union ───────────────────────────────────────────────────
 
 export type AgentEvent =
@@ -86,7 +103,9 @@ export type AgentEvent =
   | NetworkEvent
   | ServerErrorEvent
   | ToolErrorEvent
-  | UnknownErrorEvent;
+  | UnknownErrorEvent
+  | AgentPausedEvent
+  | AgentTurnEndEvent;
 
 // ─── Type Guards ─────────────────────────────────────────────
 
@@ -108,6 +127,14 @@ export function isServerErrorEvent(e: AgentEvent): e is ServerErrorEvent {
 
 export function isToolErrorEvent(e: AgentEvent): e is ToolErrorEvent {
   return e.kind === "tool_error";
+}
+
+export function isAgentPausedEvent(e: AgentEvent): e is AgentPausedEvent {
+  return e.kind === "agent_paused";
+}
+
+export function isAgentTurnEndEvent(e: AgentEvent): e is AgentTurnEndEvent {
+  return e.kind === "agent_turn_end";
 }
 
 // ─── Factory Helpers ─────────────────────────────────────────

@@ -13,12 +13,19 @@ import type { PendingPermission } from "./PermissionPrompt";
 import type { ProviderName } from "../core/config";
 import { config } from "../core/config";
 import { Conversation } from "../core/conversation";
-import { runAgent } from "../core/agent";
+import { runAgent, getToolResultSummary } from "../core/agent";
 import { PROVIDER_MODELS } from "../providers";
 import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
+import { QuestionPrompt } from "./QuestionPrompt";
 import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
-import { isAuthEvent, isNetworkEvent, isRateLimitEvent } from "../errors/base";
+import { 
+  isAuthEvent, 
+  isNetworkEvent, 
+  isRateLimitEvent,
+  isAgentPausedEvent,
+  isAgentTurnEndEvent 
+} from "../errors/base";
 
 const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
@@ -61,6 +68,10 @@ export function App() {
   const [tokenCount, setTokenCount] = useState(0);
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<{ 
+    question: string; 
+    options?: string[] 
+  } | null>(null);
   const [termWidth, setTermWidth] = useState(process.stdout.columns ?? 80);
     // ━━━ Error system state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // agentStatus drives what the UI shows during/after the loop
@@ -522,6 +533,11 @@ export function App() {
               status: "running",
             };
             activeToolCallsRef.current.set(toolId, toolCall);
+            // Communication tools return instantly — skip LivePreview to
+            // avoid a flashing "Running ask_question" / "Running send_message"
+            if (toolName === "ask_question" || toolName === "send_message") {
+              return;
+            }
             currentToolIdRef.current = toolId;
             setLivePreview({
               text: "",
@@ -558,47 +574,46 @@ export function App() {
                 resultSummary = errMsg;
               }
             } else {
-              switch (toolName) {
-                case "read_file":
-                  resultSummary = r.lines != null && r.size != null
-                    ? `${r.lines} lines (${r.size} bytes)`
-                    : "done";
-                  break;
-                case "write_file":
-                  resultSummary = r.path != null
-                    ? `${r.isNew ? "Created" : "Updated"} → ${r.bytesWritten} bytes`
-                    : "done";
-                  break;
-                case "edit_file":
-                  resultSummary = r.linesChanged != null
-                    ? `${r.linesChanged} lines changed`
-                    : "done";
-                  break;
-                case "list_files": {
-                  const entries = r.entries as string[] | undefined;
-                  const files = r.files as string[] | undefined;
-                  const dirs = r.directories as string[] | undefined;
-                  if (entries) {
-                    resultSummary = `${entries.length} items`;
-                  } else if (files && dirs) {
-                    resultSummary = `${files.length} files, ${dirs.length} dirs`;
-                  } else {
-                    resultSummary = "done";
-                  }
-                  break;
+              // run_command still needs stdout/stderr extracted for display
+              if (toolName === "run_command") {
+                stdout = r.stdout as string | undefined;
+                stderr = r.stderr as string | undefined;
+              }
+              resultSummary = getToolResultSummary(toolName, result);
+            }
+
+            // send_message with a real message → render as a notice
+            // instead of a raw tool call row, so the user sees the
+            // actual message content styled properly
+            if (toolName === "send_message" && "success" in r && r.success) {
+              const uiMsg = r.ui_message as {
+                title?: string;
+                content: string;
+                type: string;
+              } | undefined;
+
+              if (uiMsg?.content) {
+                const icon =
+                  uiMsg.type === "error"   ? "✖" :
+                  uiMsg.type === "warning" ? "⚠" :
+                  uiMsg.type === "success" ? "✔" : "ℹ";
+
+                const lines: string[] = [];
+                if (uiMsg.title) lines.push(`${icon} ${uiMsg.title}`);
+                lines.push(uiMsg.title ? `  ${uiMsg.content}` : `${icon} ${uiMsg.content}`);
+
+                pushCompleted({
+                  id: nextId(),
+                  role: "system-notice",
+                  content: lines.join("\n"),
+                });
+                isFirstChunkRef.current = false;
+                activeToolCallsRef.current.delete(targetId);
+                if (currentToolIdRef.current === targetId) {
+                  currentToolIdRef.current = null;
                 }
-                case "run_command": {
-                  const exitCode = r.exitCode as number | undefined;
-                  const duration = r.duration as number | undefined;
-                  resultSummary = exitCode != null && duration != null
-                    ? `exit ${exitCode} (${duration}ms)`
-                    : "done";
-                  stdout = r.stdout as string | undefined;
-                  stderr = r.stderr as string | undefined;
-                  break;
-                }
-                default:
-                  resultSummary = "done";
+                setLivePreview({ text: "", activeTool: null });
+                return;
               }
             }
 
@@ -636,6 +651,21 @@ export function App() {
             // see what the agent is doing (retrying, waiting, etc.)
             if (event.kind === "server_error" || event.kind === "network_error") {
               pushNotice(`⚠ ${event.message}`);
+            }
+
+            if (isAgentPausedEvent(event)) {
+              // Stop the loading spinner and show the question UI
+              setIsLoading(false); 
+              setPendingQuestion({
+                question: event.question,
+                options: event.options,
+              });
+              return;
+            }
+
+            if (isAgentTurnEndEvent(event)) {
+              setIsLoading(false);
+              return;
             }
           },
 
@@ -719,6 +749,19 @@ export function App() {
     ]
   );
 
+  // ─── Question Handlers ─────────────────────────────────────────────────────
+
+  const handleQuestionAnswer = useCallback((answer: string) => {
+    setPendingQuestion(null);
+    handleSubmit(answer);
+  }, [handleSubmit]);
+
+  const handleQuestionCancel = useCallback(() => {
+    setPendingQuestion(null);
+    setIsLoading(false);
+    pushNotice("Question cancelled. Type a message to continue.");
+  }, [pushNotice]);
+
     useInput((input, key) => {
     if (key.ctrl && input === "c") exit();
 
@@ -779,17 +822,31 @@ export function App() {
           <LivePreview text="" activeTool={null} thinkingOnly />
         )}
 
-        {/* Input bar (includes menu below itself) */}
-        <InputBar
-          onSubmit={handleSubmit}
-          isDisabled={isLoading || pendingPermission !== null}
-          width={termWidth}
-          placeholder={
-            pendingPermission
-              ? "Waiting for permission response (y/n)..."
-              : 'Try "read package.json" or @src/index.ts'
-          }
-        />
+        {/* Render the Question Prompt if the agent paused */}
+        {pendingQuestion && (
+          <Box marginX={1}>
+            <QuestionPrompt
+              question={pendingQuestion.question}
+              options={pendingQuestion.options}
+              onSubmit={handleQuestionAnswer}
+              onCancel={handleQuestionCancel}
+            />
+          </Box>
+        )}
+
+        {/* Only show the standard InputBar if the agent is NOT asking a question */}
+        {!pendingQuestion && (
+          <InputBar
+            onSubmit={handleSubmit}
+            isDisabled={isLoading || pendingPermission !== null}
+            width={termWidth}
+            placeholder={
+              pendingPermission
+                ? "Waiting for permission response (y/n)..."
+                : 'Try "read package.json" or @src/index.ts'
+            }
+          />
+        )}
 
         {/* Status line — stays at the very bottom */}
         <StatusLine

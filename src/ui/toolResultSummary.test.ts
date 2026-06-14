@@ -1,43 +1,7 @@
 // src/ui/toolResultSummary.test.ts
 import { describe, it, expect } from "vitest";
 
-// Inline the function since it's not exported — test the logic directly
-function getToolResultSummary(toolName: string, result: unknown): string {
-  if (typeof result !== "object" || result === null) return String(result);
-  const r = result as Record<string, unknown>;
-  if ("success" in r && !r.success) return `Error: ${r.error ?? "unknown"}`;
-
-  switch (toolName) {
-    case "read_file":
-      return r.lines != null && r.size != null
-        ? `${r.lines} lines, ${r.size} bytes`
-        : "done";
-    case "write_file":
-      return r.path != null
-        ? `${r.isNew ? "Created" : "Updated"}: ${r.path}`
-        : "done";
-    case "edit_file":
-      return r.linesChanged != null
-        ? `${r.linesChanged} lines changed`
-        : "done";
-    case "list_files": {
-      const files = r.files as string[] | undefined;
-      const dirs = r.directories as string[] | undefined;
-      return files && dirs
-        ? `${files.length} files, ${dirs.length} dirs`
-        : "done";
-    }
-    case "run_command": {
-      const exitCode = r.exitCode as number | undefined;
-      const duration = r.duration as number | undefined;
-      return exitCode != null && duration != null
-        ? `exit ${exitCode} (${duration}ms)`
-        : "done";
-    }
-    default:
-      return "done";
-  }
-}
+import { getToolResultSummary } from "../core/agent";
 
 describe("getToolResultSummary — success cases", () => {
   it("read_file with valid result", () => {

@@ -102,7 +102,7 @@ function buildProviderModel(provider: ProviderName, model: string) {
 
 // ━━━ Tool Result Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function getToolResultSummary(toolName: string, result: unknown): string {
+export function getToolResultSummary(toolName: string, result: unknown): string {
   if (typeof result !== "object" || result === null) return String(result);
   const r = result as Record<string, unknown>;
   if ("success" in r && !r.success) return `Error: ${r.error}`;
@@ -138,6 +138,71 @@ function getToolResultSummary(toolName: string, result: unknown): string {
         ? `exit ${exitCode} (${duration}ms)`
         : "done";
     }
+    case "web_search": {
+      const results = r.results as any[] | undefined;
+      return results ? `Found ${results.length} results` : "done";
+    }
+    case "web_fetch": {
+      const title = r.title as string | undefined;
+      return title ? `Fetched: ${title}` : "done";
+    }
+    
+case "search_files": {
+  const total    = r.total        as number  | undefined;
+  const searched = r.searchedFiles as number | undefined;
+  return total != null
+    ? `${total} results from ${searched ?? "?"} files`
+    : "done";
+}
+
+case "glob_files": {
+  const total     = r.total     as number  | undefined;
+  const truncated = r.truncated as boolean | undefined;
+  return total != null
+    ? `${total} matches${truncated ? " (truncated)" : ""}`
+    : "done";
+}
+
+case "delete_file": {
+  const type    = r.type    as string  | undefined;
+  const dryRun  = r.dryRun  as boolean | undefined;
+  const deleted = r.deletedPaths as string[] | undefined;
+  if (dryRun) return `DRY RUN: would delete ${deleted?.length ?? 1} item(s)`;
+  return type ? `Deleted ${type}: ${r.path ?? ""}` : "done";
+}
+    case "todo_write": {
+      const msg = r.message as string | undefined;
+      return msg || "done";
+    }
+    case "ask_question": {
+      const q = r.question as string | undefined;
+      return q ? `Asked: ${q.slice(0, 40)}...` : "done";
+    }
+    case "send_message": {
+  const uiMsg   = r.ui_message as { title?: string; content: string; type: string } | undefined;
+  //              ^^^^^^^^^^^   ✅ real field
+  const endsTurn = r.ends_turn as boolean | undefined;
+  //               ^^^^^^^^^^  ✅ snake_case matches actual output
+
+  if (!uiMsg?.content) return "done";
+
+  const typeIcon =
+    uiMsg.type === "error"   ? "❌" :
+    uiMsg.type === "warning" ? "⚠️" :
+    uiMsg.type === "success" ? "✅" : "ℹ️";
+
+  const preview = uiMsg.content.length > 40
+    ? uiMsg.content.slice(0, 40) + "..."
+    : uiMsg.content;
+
+  const turnLabel = endsTurn ? " [ends turn]" : "";
+
+  return `${typeIcon} ${preview}${turnLabel}`;
+  // Examples:
+  // ✅ Refactor complete (ends turn)
+  // ⚠️ Could not find config file...
+  // ℹ️ Analyzing 47 files...
+}
     default:
       return "done";
   }
@@ -401,7 +466,6 @@ export async function runAgent(options: AgentOptions): Promise<string> {
       }
 
       let toolResult: unknown;
-
       try {
         // wrapExecute in tools/index.ts already catches OS errors,
         // but we have a second safety net here for anything that escapes.
@@ -416,6 +480,46 @@ export async function runAgent(options: AgentOptions): Promise<string> {
       }
 
       if (onToolResult) onToolResult(toolName, toolResult);
+
+      if (toolResult && typeof toolResult === "object") {
+        const res = toolResult as Record<string, any>;
+        
+        // Break if ask_question was called
+        if (res.requires_user_input === true) {
+          if (onAgentEvent) {
+            onAgentEvent({
+              kind: "agent_paused",
+              message: `Agent paused: ${res.question}`,
+              question: res.question as string,
+              options: res.options as string[] | undefined,
+              retryable: false,
+              requiresUserAction: true,
+              timestamp: Date.now(),
+            });
+          }
+          return fullAssistantText; // Exit runAgent immediately
+        }
+        
+        // Break if send_message with ends_turn was called
+        if (res.message_sent === true && res.ends_turn === true) {
+          if (onAgentEvent) {
+            const uiMsg = res.ui_message as {
+              title?: string;
+              content: string;
+              type: string;
+            };
+            onAgentEvent({
+              kind: "agent_turn_end",
+              message: `Agent finished turn: ${uiMsg.content}`,
+              uiMessage: uiMsg,
+              retryable: false,
+              requiresUserAction: false,
+              timestamp: Date.now(),
+            });
+          }
+          return fullAssistantText; // Exit runAgent immediately
+        }
+      }
 
       // Feed tool result back to LLM (including errors — LLM self-corrects)
       messages.push({
