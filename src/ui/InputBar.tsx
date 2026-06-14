@@ -12,7 +12,6 @@ interface InputBarProps {
   onSubmit: (value: string) => void;
   isDisabled: boolean;
   placeholder?: string;
-  width: number;
   /** When true, show R-to-retry prompt and accept R keypress */
   networkDropped?: boolean;
 }
@@ -92,7 +91,6 @@ export function InputBar({
   onSubmit,
   isDisabled,
   placeholder = 'Try "fix typecheck errors" or @filename',
-  width,
   networkDropped = false,
 }: InputBarProps) {
   const [value, setValue] = useState("");
@@ -250,7 +248,6 @@ export function InputBar({
   );
 
   const showPlaceholder = !value;
-  const boxWidth = Math.min(width - 2, 100);
 
   return (
     <Box flexDirection="column">
@@ -266,27 +263,20 @@ export function InputBar({
         </Box>
       )}
       {/* Input box */}
-      <Box marginTop={1}>
-        <Box
-          borderStyle="round"
-          borderColor={isDisabled ? "gray" : "cyan"}
-          paddingX={1}
-          width={boxWidth}
-        >
-          <Text color={isDisabled ? "gray" : "cyan"} bold>
-            {"> "}
+      <Box marginTop={1} paddingX={1} width="100%">
+        <Text color={isDisabled ? "gray" : "cyan"} bold>
+          {"> "}
+        </Text>
+        {showPlaceholder ? (
+          <Text color="gray" dimColor>
+            {placeholder}
           </Text>
-          {showPlaceholder ? (
-            <Text color="gray" dimColor>
-              {placeholder}
-            </Text>
-          ) : (
-            <Text color={isDisabled ? "gray" : "white"} wrap="truncate-end">
-              {value}
-              {!isDisabled && <Text color="cyan">▊</Text>}
-            </Text>
-          )}
-        </Box>
+        ) : (
+          <Text color={isDisabled ? "gray" : "white"} wrap="truncate-end">
+            {value}
+            {!isDisabled && <Text color="cyan">▊</Text>}
+          </Text>
+        )}
       </Box>
 
       {/* Menu appears BELOW the input box */}
@@ -294,7 +284,6 @@ export function InputBar({
         <CommandMenu
           items={filteredCommands}
           selectedIndex={selectedIndex}
-          width={width}
         />
       )}
 
@@ -302,7 +291,6 @@ export function InputBar({
         <FileMenu
           items={filteredFiles}
           selectedIndex={selectedIndex}
-          width={width}
           query={atQuery ?? ""}
         />
       )}

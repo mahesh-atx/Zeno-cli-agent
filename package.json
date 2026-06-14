@@ -13,7 +13,8 @@
     "test": "vitest run tests/",
     "test:unit": "vitest run tests/tools tests/core tests/errors",
     "test:llm": "vitest run tests/integration/llm-tools.test.ts --reporter=verbose",
-    "test:llm:watch": "vitest tests/integration/llm-tools.test.ts --reporter=verbose"
+    "test:llm:watch": "vitest tests/integration/llm-tools.test.ts --reporter=verbose",
+    "test:patch": "vitest run tests/integration/apply-patch.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@ai-sdk/groq": "^1.2.9",

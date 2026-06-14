@@ -4,13 +4,9 @@ import { Box, Text } from "ink";
 interface WelcomeBannerProps {
   provider: string;
   model: string;
-  width: number;
 }
 
-export function WelcomeBanner({ provider, model, width }: WelcomeBannerProps) {
-  // Cap width so it's readable on wide terminals
-  const boxWidth = Math.min(width - 2, 100);
-
+export function WelcomeBanner({ provider, model }: WelcomeBannerProps) {
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box
@@ -18,7 +14,7 @@ export function WelcomeBanner({ provider, model, width }: WelcomeBannerProps) {
         borderColor="cyan"
         paddingX={2}
         paddingY={0}
-        width={boxWidth}
+        width="100%"
         flexDirection="column"
       >
         <Box>

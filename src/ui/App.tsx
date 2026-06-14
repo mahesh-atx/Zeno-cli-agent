@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Box, Static, useInput, useApp } from "ink";
 import { WelcomeBanner } from "./WelcomeBanner";
 import { LivePreview } from "./LivePreview";
@@ -72,7 +72,6 @@ export function App() {
     question: string; 
     options?: string[] 
   } | null>(null);
-  const [termWidth, setTermWidth] = useState(process.stdout.columns ?? 80);
     // ━━━ Error system state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // agentStatus drives what the UI shows during/after the loop
   type AgentStatus =
@@ -114,14 +113,6 @@ export function App() {
   // Currently-running tool (the one we render live)
   const currentToolIdRef = useRef<string | null>(null);
   const isFirstChunkRef = useRef<boolean>(true);
-
-  useEffect(() => {
-    const handleResize = () => setTermWidth(process.stdout.columns ?? 80);
-    process.stdout.on("resize", handleResize);
-    return () => {
-      process.stdout.off("resize", handleResize);
-    };
-  }, []);
 
   const pushCompleted = useCallback((msg: ChatMessage) => {
     setCompletedMessages((prev) => [...prev, msg]);
@@ -773,12 +764,16 @@ export function App() {
       pushNotice("Retrying connection...");
     }
   });
-  const staticItems: Array<
-    { kind: "welcome" } | { kind: "message"; msg: ChatMessage }
-  > = [
-    { kind: "welcome" },
-    ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
-  ];
+  const initialProvider = useRef(currentProvider);
+  const initialModel = useRef(currentModel);
+
+  const staticItems = useMemo(
+    () => [
+      { kind: "welcome" as const },
+      ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
+    ],
+    [completedMessages]
+  );
 
   const showLive =
     isLoading && (livePreview.text.length > 0 || livePreview.activeTool);
@@ -792,9 +787,8 @@ export function App() {
             return (
               <WelcomeBanner
                 key="welcome"
-                provider={currentProvider}
-                model={currentModel}
-                width={termWidth}
+                provider={initialProvider.current}
+                model={initialModel.current}
               />
             );
           }
@@ -839,7 +833,6 @@ export function App() {
           <InputBar
             onSubmit={handleSubmit}
             isDisabled={isLoading || pendingPermission !== null}
-            width={termWidth}
             placeholder={
               pendingPermission
                 ? "Waiting for permission response (y/n)..."

@@ -93,12 +93,11 @@ export function StatusLine({
   retryAttempt = 0,
   networkDropped = false,
 }: StatusLineProps) {
-  const termWidth = process.stdout.columns ?? 80;
   const tokenColor = getTokenColor(tokenCount, tokenLimit);
 
   return (
     <Box
-      width={termWidth}
+      width="100%"
       paddingX={1}
       borderStyle="single"
       borderColor={

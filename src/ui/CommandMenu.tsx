@@ -6,7 +6,6 @@ interface CommandMenuProps {
   items: Array<CommandMeta & { score?: number }>;
   selectedIndex: number;
   maxVisible?: number;
-  width: number;
 }
 
 /**
@@ -18,7 +17,6 @@ export function CommandMenu({
   items,
   selectedIndex,
   maxVisible = 8,
-  width,
 }: CommandMenuProps) {
   if (items.length === 0) {
     return (
@@ -27,7 +25,6 @@ export function CommandMenu({
         borderStyle="round"
         borderColor="gray"
         paddingX={1}
-        width={Math.min(width - 2, 80)}
       >
         <Text color="gray" dimColor>
           No matching commands
@@ -56,15 +53,12 @@ export function CommandMenu({
     ...visible.map((c) => c.name.length + (c.usage ? c.usage.length + 1 : 0))
   );
 
-  const boxWidth = Math.min(width - 2, 90);
-
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
       borderColor="cyan"
       paddingX={1}
-      width={boxWidth}
     >
       {visible.map((cmd, i) => {
         const absoluteIdx = start + i;

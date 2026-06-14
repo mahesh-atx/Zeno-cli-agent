@@ -6,7 +6,6 @@ interface FileMenuProps {
   items: FileEntry[];
   selectedIndex: number;
   maxVisible?: number;
-  width: number;
   query: string;
 }
 
@@ -14,10 +13,8 @@ export function FileMenu({
   items,
   selectedIndex,
   maxVisible = 8,
-  width,
   query,
 }: FileMenuProps) {
-  const boxWidth = Math.min(width - 2, 90);
 
   if (items.length === 0) {
     return (
@@ -26,7 +23,7 @@ export function FileMenu({
         borderStyle="round"
         borderColor="gray"
         paddingX={1}
-        width={boxWidth}
+        width="100%"
       >
         <Text color="gray" dimColor>
           No files matching "{query}"
@@ -56,7 +53,7 @@ export function FileMenu({
       borderStyle="round"
       borderColor="cyan"
       paddingX={1}
-      width={boxWidth}
+      width="100%"
     >
       <Box>
         <Text color="cyan" bold>📎 Attach file</Text>
