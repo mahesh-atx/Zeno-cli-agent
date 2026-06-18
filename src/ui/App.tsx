@@ -31,6 +31,7 @@ const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
   groq: 32768,
   nvidia: 128000,
+  opencodezen: 128000,
 };
 
 let idCounter = 0;
