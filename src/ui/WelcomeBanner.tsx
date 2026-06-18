@@ -10,11 +10,8 @@ export function WelcomeBanner({ provider, model }: WelcomeBannerProps) {
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box
-        borderStyle="round"
-        borderColor="cyan"
-        paddingX={2}
+        paddingX={1}
         paddingY={0}
-        width="100%"
         flexDirection="column"
       >
         <Box>

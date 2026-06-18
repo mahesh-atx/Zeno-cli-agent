@@ -36,7 +36,7 @@ export function QuestionPrompt({ question, options, onSubmit, onCancel }: Questi
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1} marginY={1}>
+    <Box flexDirection="column" padding={1} marginY={1}>
       <Text color="yellow" bold>❓ Agent Question</Text>
       <Box marginTop={1}>
         <Text wrap="wrap">{question}</Text>

@@ -26,6 +26,7 @@ import {
   isAgentPausedEvent,
   isAgentTurnEndEvent 
 } from "../errors/base";
+import { useTerminalWidth } from "./hooks/useTerminalWidth";
 
 const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
@@ -779,6 +780,9 @@ export function App() {
   const showLive =
     isLoading && (livePreview.text.length > 0 || livePreview.activeTool);
 
+  // We use a high max width to always track the real terminal width.
+  const termWidth = useTerminalWidth(1000);
+
   return (
     <Box flexDirection="column">
       {/* Scroll-safe history */}
@@ -798,7 +802,7 @@ export function App() {
       </Static>
 
       {/* DYNAMIC region — wrapped in a single container so Ink treats it as one unit */}
-      <Box flexDirection="column">
+      <Box flexDirection="column" width={Math.max(termWidth - 2, 20)}>
         {pendingPermission && (
           <Box marginX={1}>
             <PermissionPrompt permission={pendingPermission} />

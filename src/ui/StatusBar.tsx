@@ -28,12 +28,10 @@ export function StatusBar({
   tokenCount,
   tokenLimit,
 }: StatusBarProps) {
-  const termWidth = process.stdout.columns ?? 80;
   const tokenColor = getTokenColor(tokenCount, tokenLimit);
 
   return (
     <Box
-      width={termWidth}
       paddingX={1}
       borderStyle="single"
       borderColor="dim"

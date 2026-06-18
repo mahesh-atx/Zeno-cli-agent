@@ -20,10 +20,7 @@ export function FileMenu({
     return (
       <Box
         flexDirection="column"
-        borderStyle="round"
-        borderColor="gray"
         paddingX={1}
-        width="100%"
       >
         <Text color="gray" dimColor>
           No files matching "{query}"
@@ -50,10 +47,7 @@ export function FileMenu({
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
       paddingX={1}
-      width="100%"
     >
       <Box>
         <Text color="cyan" bold>📎 Attach file</Text>

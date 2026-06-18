@@ -96,20 +96,12 @@ export function StatusLine({
   const tokenColor = getTokenColor(tokenCount, tokenLimit);
 
   return (
-    <Box
-      width="100%"
-      paddingX={1}
-      borderStyle="single"
-      borderColor={
-        agentStatus === "network_dropped" || agentStatus === "fatal_error"
-          ? "red"
-          : agentStatus === "rate_limited" || agentStatus === "retrying"
-          ? "yellow"
-          : "dim"
-      }
-      flexDirection="row"
-      justifyContent="space-between"
-    >
+    <Box flexDirection="column" marginTop={1}>
+      <Box
+        paddingX={1}
+        flexDirection="row"
+        justifyContent="space-between"
+      >
       {/* Left: provider + model + agent status */}
       <Box gap={1}>
         <Text color="cyan" bold>
@@ -145,6 +137,7 @@ export function StatusLine({
             <Text color="dim">{formatTokenCount(tokenLimit)}</Text>
           </>
         )}
+      </Box>
       </Box>
     </Box>
   );

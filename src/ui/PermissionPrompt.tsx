@@ -26,8 +26,6 @@ export function PermissionPrompt({ permission }: PermissionPromptProps) {
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
-      borderColor="yellow"
       paddingX={1}
       marginTop={1}
     >

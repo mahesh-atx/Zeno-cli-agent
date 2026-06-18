@@ -22,8 +22,6 @@ export function CommandMenu({
     return (
       <Box
         flexDirection="column"
-        borderStyle="round"
-        borderColor="gray"
         paddingX={1}
       >
         <Text color="gray" dimColor>
@@ -56,8 +54,6 @@ export function CommandMenu({
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
       paddingX={1}
     >
       {visible.map((cmd, i) => {

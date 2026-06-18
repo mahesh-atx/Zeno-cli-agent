@@ -263,20 +263,23 @@ export function InputBar({
         </Box>
       )}
       {/* Input box */}
-      <Box marginTop={1} paddingX={1} width="100%">
-        <Text color={isDisabled ? "gray" : "cyan"} bold>
-          {"> "}
-        </Text>
-        {showPlaceholder ? (
-          <Text color="gray" dimColor>
-            {placeholder}
+      <Box marginTop={1} paddingX={0} flexDirection="column">
+        <Box paddingTop={1} paddingX={1}>
+          <Text backgroundColor={isDisabled ? undefined : "cyan"} color={isDisabled ? "gray" : "black"} bold>
+            {isDisabled ? "> " : " ❯ "}
           </Text>
-        ) : (
-          <Text color={isDisabled ? "gray" : "white"} wrap="truncate-end">
-            {value}
-            {!isDisabled && <Text color="cyan">▊</Text>}
-          </Text>
-        )}
+          <Text>{" "}</Text>
+          {showPlaceholder ? (
+            <Text color="gray" dimColor>
+              {placeholder}
+            </Text>
+          ) : (
+            <Text color={isDisabled ? "gray" : "white"} wrap="truncate-end">
+              {value}
+              {!isDisabled && <Text color="cyan">▊</Text>}
+            </Text>
+          )}
+        </Box>
       </Box>
 
       {/* Menu appears BELOW the input box */}
