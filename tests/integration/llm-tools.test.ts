@@ -782,8 +782,12 @@ describe("LLM Tool Integration", () => {
         // Tool should return success: false
         expect(toolResult?.success).toBe(false);
 
-        // LLM should report the failure
-        expect(result.response.toLowerCase()).toMatch(
+        // LLM should report the failure either in response text or via send_message
+        const sentMessageTool = result.toolResults["send_message"] as any;
+        const messageText = sentMessageTool?.ui_message?.content || "";
+        const combinedText = (result.response + " " + messageText).toLowerCase();
+
+        expect(combinedText).toMatch(
           /not found|doesn.t exist|does not exist|no file|cannot find|error/i
         );
       },
