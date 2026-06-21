@@ -1,5 +1,15 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { ThemedGradient } from "./ThemedGradient";
+
+const LOGO_LINES = [
+  ' ▝▜▄      ▗█▀▀▜▙▝█▛▀▀▌▜██▖▟██▘▜█▘▜██▖▝█▛▝█▛',
+  '   ▝▜▄    █▌     █▙▟  ▐█▝█▛▐█ ▐█ ▐█▝█▖█▌ █▌',
+  '  ▗▟▀     ▜▙ ▝█▛ █▌▝ ▖▐█   ▐█ ▐█ ▐█ ▝██▌ █▌',
+  ' ▝▀        ▀▀▀▀▘▝▀▀▀▀▘▀▀▘  ▀▀▘▀▀▘▀▀▘ ▝▀▀▝▀▀'
+];
+
+const LOGO = LOGO_LINES.join("\n");
 
 interface WelcomeBannerProps {
   provider: string;
@@ -14,36 +24,7 @@ export function WelcomeBanner({ provider, model }: WelcomeBannerProps) {
         paddingY={0}
         flexDirection="column"
       >
-        <Box>
-          <Text color="cyan" bold>
-            ✻ Welcome to{" "}
-          </Text>
-          <Text color="cyanBright" bold>
-            CLI Agent
-          </Text>
-          <Text color="cyan" bold>
-            !
-          </Text>
-        </Box>
-
-        <Box marginTop={1}>
-          <Text color="dim">  /help</Text>
-          <Text color="dim"> for help, </Text>
-          <Text color="dim">/status</Text>
-          <Text color="dim"> for your current setup</Text>
-        </Box>
-
-        <Box marginTop={1}>
-          <Text color="dim">  cwd: </Text>
-          <Text color="white">{process.cwd()}</Text>
-        </Box>
-
-        <Box marginTop={1}>
-          <Text color="dim">  model: </Text>
-          <Text color="green">{model}</Text>
-          <Text color="dim"> · provider: </Text>
-          <Text color="cyan">{provider}</Text>
-        </Box>
+        <ThemedGradient>{LOGO}</ThemedGradient>
       </Box>
 
       <Box flexDirection="column" marginTop={1} paddingX={1}>

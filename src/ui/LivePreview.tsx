@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { ToolOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
+import { Ansi } from "./Ansi";
 import { renderStreaming } from "../utils/render";
 
 interface LivePreviewProps {
@@ -42,11 +43,13 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
     );
   }
 
-  // Streaming text — show only the tail so the preview has bounded height
-  const rendered = renderStreaming(text);
-  const lines = rendered.split("\n");
-  const tail = lines.slice(-MAX_PREVIEW_LINES);
-  const hasOverflow = lines.length > MAX_PREVIEW_LINES;
+  // Streaming text — show only the tail so the preview has bounded height.
+  // Tail the *raw* text first so fenced code blocks / paragraphs aren't split
+  // mid-span, then markdown-render the visible tail.
+  const rawLines = text.split("\n");
+  const tail = rawLines.slice(-MAX_PREVIEW_LINES);
+  const hasOverflow = rawLines.length > MAX_PREVIEW_LINES;
+  const rendered = renderStreaming(tail.join("\n"));
 
   return (
     <Box marginTop={hideIcon ? 0 : 1} paddingX={1} flexDirection="column">
@@ -55,18 +58,16 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
           <Text color="cyan" bold>✻ </Text>
           <Text color="gray" dimColor>
             {hasOverflow
-              ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${lines.length} lines)…`
+              ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${rawLines.length} lines)…`
               : "streaming…"}
           </Text>
         </Box>
       )}
       <Box flexDirection="column" marginLeft={2}>
-        {tail.map((line, i) => (
-          <Text key={i} wrap="wrap">
-            {line}
-            {i === tail.length - 1 && <Text color="cyan">▊</Text>}
-          </Text>
-        ))}
+        <Ansi wrap="wrap">
+          {rendered}
+          {"\u258a"}
+        </Ansi>
       </Box>
     </Box>
   );

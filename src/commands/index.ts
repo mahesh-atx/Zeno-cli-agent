@@ -258,9 +258,13 @@ export const COMMANDS: Array<CommandMeta & { handler: CommandHandler }> = [
   },
   {
     name: "/model",
-    description: "Switch model or list available",
-    usage: "[name]",
+    description: "Show or change current model",
     handler: handleModel,
+  },
+  {
+    name: "/provider",
+    description: "Switch AI provider (NIM, OpenRouter)",
+    handler: () => ({ handled: true }), // Intercepted by InputBar UI
   },
   {
     name: "/add",

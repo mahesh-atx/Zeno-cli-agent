@@ -8,11 +8,6 @@ interface CommandMenuProps {
   maxVisible?: number;
 }
 
-/**
- * Dropdown that appears above the input bar when the user types '/'.
- * Renders with bounded height and respects terminal width.
- * Highlights the currently-selected row.
- */
 export function CommandMenu({
   items,
   selectedIndex,
@@ -31,7 +26,6 @@ export function CommandMenu({
     );
   }
 
-  // Windowing: keep the selected item visible
   const total = items.length;
   let start = 0;
   if (total > maxVisible) {
@@ -46,51 +40,46 @@ export function CommandMenu({
   }
   const visible = items.slice(start, start + maxVisible);
 
-  // Compute max name width for column alignment
-  const maxNameLen = Math.max(
-    ...visible.map((c) => c.name.length + (c.usage ? c.usage.length + 1 : 0))
+  const leftColWidth = Math.max(
+    20,
+    ...visible.map((c) => c.name.length + (c.usage ? c.usage.length + 1 : 0) + 6)
   );
 
   return (
-    <Box
-      flexDirection="column"
-      paddingX={1}
-    >
+    <Box flexDirection="column" width="100%">
+      <Box paddingX={1} flexDirection="column" marginBottom={1}>
+        <Text color="#ffb000" bold>Available commands</Text>
+      </Box>
+
       {visible.map((cmd, i) => {
         const absoluteIdx = start + i;
         const isSelected = absoluteIdx === selectedIndex;
         const display = cmd.usage ? `${cmd.name} ${cmd.usage}` : cmd.name;
-        const padded = display.padEnd(maxNameLen + 2);
 
         return (
-          <Box key={cmd.name}>
-            <Text
-              color={isSelected ? "black" : "cyan"}
-              backgroundColor={isSelected ? "cyan" : undefined}
-              bold={isSelected}
-            >
-              {isSelected ? "❯ " : "  "}
-              {padded}
-            </Text>
-            <Text
-              color={isSelected ? "black" : "gray"}
-              backgroundColor={isSelected ? "cyan" : undefined}
-              dimColor={!isSelected}
-            >
-              {cmd.description}
-            </Text>
+          <Box
+            key={cmd.name}
+            width="100%"
+            paddingX={1}
+            flexDirection="row"
+            backgroundColor={isSelected ? "#ffb000" : undefined}
+          >
+            <Box width={leftColWidth}>
+              <Text color={isSelected ? "black" : "white"} bold={isSelected}>
+                {isSelected ? "❯ " : "  "}{display}
+              </Text>
+            </Box>
+            <Box>
+              <Text color={isSelected ? "black" : "gray"} dimColor={!isSelected}>
+                {cmd.description}
+              </Text>
+            </Box>
           </Box>
         );
       })}
 
-      {/* Footer with hints + scroll indicator */}
-      <Box marginTop={0}>
-        <Text color="gray" dimColor>
-          {total > maxVisible
-            ? `${selectedIndex + 1}/${total}  ·  `
-            : ""}
-          ↑↓ navigate · Tab/Enter accept · Esc close
-        </Text>
+      <Box paddingX={1} marginTop={1}>
+        <Text dimColor>Enter to confirm · Esc to exit</Text>
       </Box>
     </Box>
   );

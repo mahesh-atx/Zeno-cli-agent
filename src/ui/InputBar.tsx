@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import Fuse from "fuse.js";
 import { CommandMenu } from "./CommandMenu";
@@ -7,6 +7,10 @@ import { COMMAND_META } from "../commands";
 import type { CommandMeta } from "../commands";
 import { searchFiles, getFileList } from "../utils/fileSearch";
 import type { FileEntry } from "../utils/fileSearch";
+import { ProviderMenu, PROVIDER_LIST } from "./ProviderMenu";
+import { ModelMenu } from "./ModelMenu";
+import type { ProviderName } from "../core/config";
+import { getModelsForProvider } from "../providers";
 
 interface InputBarProps {
   onSubmit: (value: string) => void;
@@ -14,6 +18,11 @@ interface InputBarProps {
   placeholder?: string;
   /** When true, show R-to-retry prompt and accept R keypress */
   networkDropped?: boolean;
+  currentProviderId: ProviderName;
+  currentModelId: string;
+  onProviderConfirm: (provider: ProviderName) => void;
+  onModelConfirm: (model: string) => void;
+  onMenuStateChange?: (isOpen: boolean) => void;
 }
 
 // ─── Slash command fuzzy index ────────────────────────────────────────────────
@@ -48,37 +57,18 @@ function getFilteredCommands(value: string): CommandMeta[] {
 
 // ─── @-mention helpers ───────────────────────────────────────────────────────
 
-/**
- * Detect if the user is currently typing an @mention.
- * Returns the query (the text after @, up to the cursor) or null.
- *
- * Triggers when:
- * - There's an "@" preceded by start-of-string or whitespace
- * - And no whitespace between "@" and end-of-string
- */
 function getActiveAtMentionQuery(value: string): string | null {
-  // Find the last "@" in the string
   const atIdx = value.lastIndexOf("@");
   if (atIdx === -1) return null;
-
-  // Must be at start or preceded by whitespace
   if (atIdx > 0) {
     const prev = value[atIdx - 1];
     if (prev !== " " && prev !== "\t" && prev !== "\n") return null;
   }
-
-  // Get text after the @
   const after = value.slice(atIdx + 1);
-
-  // If there's whitespace after, the mention is "complete" — don't show menu
   if (/\s/.test(after)) return null;
-
   return after;
 }
 
-/**
- * Replace the active @-mention with the selected file path.
- */
 function replaceAtMention(value: string, filePath: string): string {
   const atIdx = value.lastIndexOf("@");
   if (atIdx === -1) return value;
@@ -90,26 +80,41 @@ function replaceAtMention(value: string, filePath: string): string {
 export function InputBar({
   onSubmit,
   isDisabled,
-  placeholder = 'Try "fix typecheck errors" or @filename',
+  placeholder: placeholderProp,
   networkDropped = false,
+  currentProviderId,
+  currentModelId,
+  onProviderConfirm,
+  onModelConfirm,
+  onMenuStateChange,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
+  
+  const [showProviderPicker, setShowProviderPicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   // ── Decide which menu (if any) to show ──
   const commandMenuVisible =
-    !isDisabled && !menuClosed && shouldShowCommandMenu(value);
+    !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker && shouldShowCommandMenu(value);
 
-  const atQuery = !isDisabled && !menuClosed
+  const atQuery = !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker
     ? getActiveAtMentionQuery(value)
     : null;
   const fileMenuVisible = !commandMenuVisible && atQuery !== null;
 
+  const isMenuOpen = commandMenuVisible || fileMenuVisible || showProviderPicker || showModelPicker;
+
+  useEffect(() => {
+    if (onMenuStateChange) {
+      onMenuStateChange(isMenuOpen);
+    }
+  }, [isMenuOpen, onMenuStateChange]);
+
   // ── Warm the file cache as soon as user types @ ──
   useEffect(() => {
     if (fileMenuVisible) {
-      // Trigger the cache build (returns instantly if cached)
       getFileList();
     }
   }, [fileMenuVisible]);
@@ -124,28 +129,43 @@ export function InputBar({
     () => (fileMenuVisible ? searchFiles(atQuery ?? "", 50) : []),
     [atQuery, fileMenuVisible]
   );
+  
+  const modelsForCurrentProvider = useMemo(
+    () => getModelsForProvider(currentProviderId),
+    [currentProviderId]
+  );
 
   // ── Reset selection when input changes ──
   useEffect(() => {
     setSelectedIndex(0);
   }, [value]);
 
-  // ── Reset menuClosed when slash/at is removed ──
-  useEffect(() => {
-    if (menuClosed) {
-      const hasSlash = value.startsWith("/");
-      const hasAt = getActiveAtMentionQuery(value) !== null;
-      if (!hasSlash && !hasAt) {
-        setMenuClosed(false);
-      }
-    }
-  }, [value, menuClosed]);
-
   // ── Apply selected command ──
+  const handleSlashCommand = (command: string) => {
+    if (command === "/provider") {
+      setShowProviderPicker(true);
+      setValue("");
+      return;
+    }
+    if (command === "/model") {
+      setShowModelPicker(true);
+      setValue("");
+      return;
+    }
+    
+    // Submit normally for other commands
+    onSubmit(command);
+    setValue("");
+  };
+
   const acceptSelectedCommand = () => {
     if (filteredCommands.length === 0) return;
     const cmd = filteredCommands[Math.min(selectedIndex, filteredCommands.length - 1)];
-    setValue(cmd.usage ? `${cmd.name} ` : cmd.name);
+    if (cmd.usage) {
+      setValue(`${cmd.name} `);
+    } else {
+      handleSlashCommand(cmd.name);
+    }
   };
 
   // ── Apply selected file ──
@@ -158,6 +178,62 @@ export function InputBar({
   useInput(
     (input, key) => {
       if (isDisabled) return;
+
+      if (showProviderPicker) {
+        const len = PROVIDER_LIST.length;
+        if (key.upArrow) {
+          if (len > 0) setSelectedIndex((prev) => (prev - 1 + len) % len);
+          return;
+        }
+        if (key.downArrow) {
+          if (len > 0) setSelectedIndex((prev) => (prev + 1) % len);
+          return;
+        }
+        if (key.escape) {
+          setShowProviderPicker(false);
+          setValue("");
+          return;
+        }
+        if (key.return) {
+          if (len > 0) {
+            const p = PROVIDER_LIST[Math.min(selectedIndex, len - 1)];
+            if (p) {
+              setShowProviderPicker(false);
+              setValue("");
+              onProviderConfirm(p.id);
+            }
+          }
+          return;
+        }
+      }
+
+      if (showModelPicker) {
+        const len = modelsForCurrentProvider.length;
+        if (key.upArrow) {
+          if (len > 0) setSelectedIndex((prev) => (prev - 1 + len) % len);
+          return;
+        }
+        if (key.downArrow) {
+          if (len > 0) setSelectedIndex((prev) => (prev + 1) % len);
+          return;
+        }
+        if (key.escape) {
+          setShowModelPicker(false);
+          setValue("");
+          return;
+        }
+        if (key.return) {
+          if (len > 0) {
+            const m = modelsForCurrentProvider[Math.min(selectedIndex, len - 1)];
+            if (m) {
+              setShowModelPicker(false);
+              setValue("");
+              onModelConfirm(m);
+            }
+          }
+          return;
+        }
+      }
 
       // ── Command menu navigation ──
       if (commandMenuVisible && filteredCommands.length > 0) {
@@ -173,23 +249,12 @@ export function InputBar({
           );
           return;
         }
-        if (key.tab) {
+        if (key.tab || key.return) {
           acceptSelectedCommand();
           return;
         }
         if (key.escape) {
           setMenuClosed(true);
-          return;
-        }
-        if (key.return) {
-          const cmd = filteredCommands[selectedIndex];
-          if (!cmd) return;
-          if (cmd.usage) {
-            setValue(`${cmd.name} `);
-          } else {
-            onSubmit(cmd.name);
-            setValue("");
-          }
           return;
         }
       }
@@ -222,6 +287,17 @@ export function InputBar({
       // ── Regular input ──
       if (key.return) {
         const trimmed = value.trim();
+        if (trimmed === "/provider") {
+          setShowProviderPicker(true);
+          setValue("");
+          return;
+        }
+        if (trimmed === "/model") {
+          setShowModelPicker(true);
+          setValue("");
+          return;
+        }
+        
         if (trimmed) {
           onSubmit(trimmed);
           setValue("");
@@ -248,12 +324,14 @@ export function InputBar({
   );
 
   const showPlaceholder = !value;
+  const cursor = !isDisabled ? "█" : " ";
+  const placeholder = placeholderProp ?? 'Type your message or @file...';
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width="100%" marginTop={1}>
       {/* Network drop retry prompt */}
       {networkDropped && (
-        <Box marginTop={1} paddingX={1}>
+        <Box paddingX={1}>
           <Text color="red" bold>
             ✖ Network connection lost.{" "}
           </Text>
@@ -262,34 +340,46 @@ export function InputBar({
           </Text>
         </Box>
       )}
-      {/* Input box */}
-      <Box marginTop={1} paddingX={0} flexDirection="column">
-        <Box paddingTop={1} paddingX={1}>
-          <Text backgroundColor={isDisabled ? undefined : "cyan"} color={isDisabled ? "gray" : "black"} bold>
-            {isDisabled ? "> " : " ❯ "}
+
+      {/* Input box styled like kode-cli */}
+      <Box
+        width="100%"
+        backgroundColor="#222222" // DarkGray equivalent
+      >
+        <Text color="magentaBright" bold>
+          {" ❯ "}
+        </Text>
+        {value.length > 0 ? (
+          <Text color="white">
+            {value}
+            <Text color="cyanBright">{cursor}</Text>
           </Text>
-          <Text>{" "}</Text>
-          {showPlaceholder ? (
-            <Text color="gray" dimColor>
-              {placeholder}
-            </Text>
-          ) : (
-            <Text color={isDisabled ? "gray" : "white"} wrap="truncate-end">
-              {value}
-              {!isDisabled && <Text color="cyan">▊</Text>}
-            </Text>
-          )}
-        </Box>
+        ) : (
+          <Text>
+            <Text color="cyanBright">{cursor}</Text>
+            <Text dimColor>{placeholder}</Text>
+          </Text>
+        )}
       </Box>
 
-      {/* Menu appears BELOW the input box */}
+      {/* Menus */}
+      {showModelPicker && (
+        <ModelMenu
+          models={modelsForCurrentProvider}
+          selectedIndex={selectedIndex}
+          currentModelId={currentModelId}
+          providerLabel={PROVIDER_LIST.find((p) => p.id === currentProviderId)?.label ?? ""}
+        />
+      )}
+      {showProviderPicker && (
+        <ProviderMenu selectedIndex={selectedIndex} currentProviderId={currentProviderId} />
+      )}
       {commandMenuVisible && (
         <CommandMenu
           items={filteredCommands}
           selectedIndex={selectedIndex}
         />
       )}
-
       {fileMenuVisible && (
         <FileMenu
           items={filteredFiles}

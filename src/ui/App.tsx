@@ -43,12 +43,55 @@ const nextToolId = () => `tool-${++idCounter}`;
 const PARAGRAPH_BREAK = "\n\n";
 
 // Hard cap so a never-ending paragraph doesn't grow the live region unbounded.
-// When buffer exceeds this, flush at the last newline (or hard cut).
+// When buffer exceeds this, we flush at the last newline (or hard cut).
 const MAX_LIVE_CHARS = 1200;
 
 // Throttle live state updates so we don't re-render every single token
 // on fast streams. 60ms ≈ ~16fps, smooth and easy on the terminal.
 const LIVE_UPDATE_MS = 60;
+
+/**
+ * Find the longest flushable prefix of `buf` that ends at a paragraph break
+ * AND is outside any open code fence (``` ... ```). Flushing inside a code
+ * block would split it mid-fence and break markdown rendering of the first
+ * chunk (an unclosed fence leaks styling into the prose that follows).
+ *
+ * Returns the number of characters safe to flush (0 = keep buffering).
+ */
+function findFlushBoundary(buf: string): number {
+  const breakIdx = buf.lastIndexOf(PARAGRAPH_BREAK);
+  if (breakIdx < 0) return 0;
+  // Walk line-by-line up to the break; track open fence state.
+  const upto = buf.slice(0, breakIdx);
+  const lines = upto.split("\n");
+  let inFence = false;
+  for (const line of lines) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) inFence = !inFence;
+  }
+  if (inFence) return 0; // still inside an unclosed code block
+  return breakIdx + PARAGRAPH_BREAK.length;
+}
+
+// Hard-cap fallback: flush at the last newline that is *outside* a code fence
+// so we never split a fenced block mid-stream.
+function findHardCapBoundary(buf: string): number {
+  let inFence = false;
+  let safe = -1;
+  const lines = buf.split("\n");
+  let consumed = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineLen = line.length + (i < lines.length - 1 ? 1 : 0);
+    const startsFence = /^\s{0,3}(```|~~~)/.test(line);
+    // A position is safe to cut at the END of a line only when we are NOT
+    // currently inside a fence (cutting right at the closing fence is fine
+    // because inFence flips to false after processing it).
+    if (!inFence) safe = consumed + lineLen;
+    if (startsFence) inFence = !inFence;
+    consumed += lineLen;
+  }
+  return safe; // -1 if nowhere safe (entirely inside a fence)
+}
 
 export function App() {
   const { exit } = useApp();
@@ -74,6 +117,7 @@ export function App() {
     question: string; 
     options?: string[] 
   } | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
     // ━━━ Error system state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // agentStatus drives what the UI shows during/after the loop
   type AgentStatus =
@@ -168,30 +212,9 @@ export function App() {
     let buf = streamBufferRef.current;
     let didFlush = false;
 
-    // Flush every complete paragraph (\n\n)
-    let idx = buf.indexOf(PARAGRAPH_BREAK);
-    while (idx !== -1) {
-      const chunk = buf.slice(0, idx + PARAGRAPH_BREAK.length);
-      buf = buf.slice(idx + PARAGRAPH_BREAK.length);
-      if (chunk.trim()) {
-        pushCompleted({
-          id: nextId(),
-          role: "assistant",
-          content: chunk.replace(/\n+$/, ""),
-          isStreaming: false,
-          hideIcon: !isFirstChunkRef.current,
-        });
-        isFirstChunkRef.current = false;
-        didFlush = true;
-      }
-      idx = buf.indexOf(PARAGRAPH_BREAK);
-    }
-
-    // Hard cap: if buffer is too long even without paragraph breaks,
-    // flush at the last newline (or hard cut).
-    if (buf.length > MAX_LIVE_CHARS) {
-      const nl = buf.lastIndexOf("\n", MAX_LIVE_CHARS);
-      const cut = nl !== -1 ? nl + 1 : MAX_LIVE_CHARS;
+    // Flush every complete paragraph (\n\n) — but never inside a code fence.
+    let cut = findFlushBoundary(buf);
+    while (cut > 0) {
       const chunk = buf.slice(0, cut);
       buf = buf.slice(cut);
       if (chunk.trim()) {
@@ -204,6 +227,29 @@ export function App() {
         });
         isFirstChunkRef.current = false;
         didFlush = true;
+      }
+      cut = findFlushBoundary(buf);
+    }
+
+    // Hard cap: if buffer is too long even without a paragraph break, flush
+    // at the last newline that is outside any code fence (or hold off if the
+    // whole buffer is one big fenced block).
+    if (buf.length > MAX_LIVE_CHARS) {
+      const safe = findHardCapBoundary(buf);
+      if (safe > 0) {
+        const chunk = buf.slice(0, safe);
+        buf = buf.slice(safe);
+        if (chunk.trim()) {
+          pushCompleted({
+            id: nextId(),
+            role: "assistant",
+            content: chunk.replace(/\n+$/, ""),
+            isStreaming: false,
+            hideIcon: !isFirstChunkRef.current,
+          });
+          isFirstChunkRef.current = false;
+          didFlush = true;
+        }
       }
     }
 
@@ -835,25 +881,42 @@ export function App() {
 
         {/* Only show the standard InputBar if the agent is NOT asking a question */}
         {!pendingQuestion && (
-          <InputBar
-            onSubmit={handleSubmit}
-            isDisabled={isLoading || pendingPermission !== null}
-            placeholder={
-              pendingPermission
-                ? "Waiting for permission response (y/n)..."
-                : 'Try "read package.json" or @src/index.ts'
-            }
-          />
+          <Box marginTop={1} flexDirection="column">
+            <InputBar
+              onSubmit={handleSubmit}
+              isDisabled={isLoading || pendingPermission !== null || agentStatus === "retrying" || agentStatus === "rate_limited"}
+              placeholder={
+                pendingPermission
+                  ? "Waiting for permission response (y/n)..."
+                  : 'Try "read package.json" or @src/index.ts'
+              }
+              networkDropped={networkDropped}
+              currentProviderId={currentProvider}
+              currentModelId={currentModel}
+              onProviderConfirm={(provider) => {
+                setCurrentProvider(provider);
+                contextManagerRef.current.setProvider(provider);
+                pushNotice(`Switched provider to ${provider}`);
+              }}
+              onModelConfirm={(model) => {
+                setCurrentModel(model);
+                pushNotice(`Switched model to ${model}`);
+              }}
+              onMenuStateChange={setIsMenuOpen}
+            />
+          </Box>
         )}
 
         {/* Status line — stays at the very bottom */}
-        <StatusLine
-          provider={currentProvider}
-          model={currentModel}
-          tokenCount={tokenCount}
-          tokenLimit={TOKEN_LIMITS[currentProvider]}
-          contextFileCount={contextManagerRef.current.getFileCount()}
-        />
+        {!isMenuOpen && (
+          <StatusLine
+            provider={currentProvider}
+            model={currentModel}
+            tokenCount={tokenCount}
+            tokenLimit={TOKEN_LIMITS[currentProvider]}
+            contextFileCount={contextManagerRef.current.getFileCount()}
+          />
+        )}
       </Box>
     </Box>
   );

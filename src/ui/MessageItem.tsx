@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { ToolOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
+import { Ansi } from "./Ansi";
 import { renderMarkdown, renderStreaming } from "../utils/render";
 
 export type MessageRole = "user" | "assistant" | "error" | "system-notice";
@@ -66,10 +67,10 @@ function AssistantMessage({
 
         {rendered && (
           <Box flexDirection="column">
-            <Text wrap="wrap">
+            <Ansi wrap="wrap">
               {rendered}
-              {isStreaming && <Text color="cyan">▊</Text>}
-            </Text>
+              {isStreaming ? "\u258a" : ""}
+            </Ansi>
           </Box>
         )}
       </Box>
