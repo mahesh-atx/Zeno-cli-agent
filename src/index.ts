@@ -1,5 +1,6 @@
 import React from "react";
 import { render } from "ink";
+import "./themes/theme-manager";
 import { App } from "./ui/App";
 
 const [major] = process.versions.node.split(".").map(Number);

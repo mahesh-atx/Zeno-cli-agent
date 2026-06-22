@@ -18,6 +18,7 @@ import { PROVIDER_MODELS } from "../providers";
 import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
 import { QuestionPrompt } from "./QuestionPrompt";
+import { themeManager } from "../themes/theme-manager";
 import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
 import { 
   isAuthEvent, 
@@ -110,6 +111,7 @@ export function App() {
     config.defaultProvider
   );
   const [currentModel, setCurrentModel] = useState<string>(config.defaultModel);
+  const [currentThemeName, setCurrentThemeName] = useState<string>(themeManager.getActiveTheme().name);
   const [tokenCount, setTokenCount] = useState(0);
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null);
@@ -169,6 +171,16 @@ export function App() {
       pushCompleted({ id: nextId(), role: "system-notice", content });
     },
     [pushCompleted]
+  );
+
+  const handleThemeConfirm = useCallback(
+    (themeName: string) => {
+      themeManager.commitPreview();
+      setCurrentThemeName(themeName);
+      pushCompleted({ id: nextId(), role: "user", content: `/theme ${themeName}` });
+      pushNotice(`└ Set theme to "${themeName}"`);
+    },
+    [pushCompleted, pushNotice]
   );
 
   // ─── Live preview update (throttled) ────────────────────────────────────────
@@ -329,10 +341,6 @@ export function App() {
               "  /help              Show this list",
               "  /model [name]      Switch model or list all",
               "  /clear             Clear conversation",
-              "  /tokens            Show token usage breakdown",
-              "  /add [path]        Add file to context (no path = list files)",
-              "  /remove <path>     Remove file from context",
-              "  /context           Show context window summary",
               "  /exit              Quit",
               "",
               "Tips:",
@@ -350,38 +358,10 @@ export function App() {
           pushNotice("Conversation and context cleared.");
           return true;
 
-                case "/tokens": {
-          const historyTokens = conversationRef.current.getHistoryTokens();
-          const summary = contextManagerRef.current.getSummary(historyTokens);
-          const lines = [
-            `Context: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens (${summary.percent.toFixed(1)}%)`,
-            `  History : ${formatTokenCount(summary.historyTokens)} tokens`,
-            `  Files   : ${formatTokenCount(summary.fileTokens)} tokens (${summary.fileCount} file${summary.fileCount !== 1 ? "s" : ""})`,
-          ];
-          if (summary.files.length > 0) {
-            lines.push("  In context:");
-            summary.files.forEach((f) => lines.push(`    • ${f}`));
-          }
-          pushNotice(lines.join("\n"));
-          return true;
-        }
-
         case "/add": {
           const filePath = args[0];
           if (!filePath) {
-            // Show currently loaded files
-            const files = contextManagerRef.current.getFiles();
-            if (files.length === 0) {
-              pushNotice("No files in context. Use /add <path> to add one.");
-            } else {
-              const lines = ["Files in context:"];
-              files.forEach((f) =>
-                lines.push(
-                  `  • ${f.filePath} (${formatTokenCount(f.tokens)} tokens, via ${f.source})`
-                )
-              );
-              pushNotice(lines.join("\n"));
-            }
+            pushNotice("Usage: /add <path>");
             return true;
           }
           const result = contextManagerRef.current.addFile(filePath, "command");
@@ -415,31 +395,6 @@ export function App() {
           return true;
         }
 
-        case "/context": {
-          // Alias for /add with no args — shows context summary
-          const files = contextManagerRef.current.getFiles();
-          const historyTokens = conversationRef.current.getHistoryTokens();
-          const summary = contextManagerRef.current.getSummary(historyTokens);
-          if (files.length === 0) {
-            pushNotice(
-              `Context window: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens\n` +
-              `No files loaded. Use /add <path> or @filename to add files.`
-            );
-          } else {
-            const lines = [
-              `Context window: ${formatTokenCount(summary.used)} / ${formatTokenCount(summary.total)} tokens (${summary.percent.toFixed(1)}%)`,
-              "Files:",
-            ];
-            files.forEach((f) =>
-              lines.push(
-                `  • ${f.filePath}  ${formatTokenCount(f.tokens)} tokens`
-              )
-            );
-            pushNotice(lines.join("\n"));
-          }
-          return true;
-        }
-
         case "/model": {
           const modelArg = args[0];
           if (!modelArg) {
@@ -462,7 +417,6 @@ export function App() {
           if (match) {
             setCurrentProvider(match.provider);
             setCurrentModel(match.model);
-            // Update context manager so token limits reflect new provider
             contextManagerRef.current.setProvider(match.provider);
             pushNotice(`Switched to ${match.model} (${match.provider})`);
           } else {
@@ -474,7 +428,7 @@ export function App() {
 
         case "/exit":
           pushNotice("Goodbye.");
-          setTimeout(() => exit(), 200);
+          setTimeout(() => process.exit(0), 200);
           return true;
 
         default:
@@ -482,7 +436,7 @@ export function App() {
           return true;
       }
     },
-    [pushCompleted, pushNotice, currentModel, currentProvider, exit]
+    [pushCompleted, pushNotice, currentModel, currentProvider]
   );
 
   // ─── Submit ────────────────────────────────────────────────────────────────
@@ -496,8 +450,6 @@ export function App() {
       pushCompleted({ id: nextId(), role: "user", content: trimmed });
 
       // ── Auto-add @mentioned files to context ─────────────────
-      // Extract all @mentions from user input and load them into
-      // the ContextManager if not already loaded.
       const mentionRegex = /@([\w.\/\-]+)/g;
       let mentionMatch;
       const mentionNotices: string[] = [];
@@ -514,7 +466,6 @@ export function App() {
               `Added to context: ${mentionedPath} (${formatTokenCount(result.tokens ?? 0)} tokens)`
             );
           }
-          // Silent fail on mention — don't block the message if file not found
         }
       }
 
@@ -526,7 +477,6 @@ export function App() {
 
       setIsLoading(true);
 
-      // ── Warn user if approaching context limit ────────────────
       const preRunHistory = conversationRef.current.getHistoryTokens();
       const preRunSummary = contextManagerRef.current.getSummary(preRunHistory);
       if (preRunSummary.percent >= 70 && preRunSummary.percent < 85) {
@@ -544,7 +494,7 @@ export function App() {
       currentToolIdRef.current = null;
       setLivePreview({ text: "", activeTool: null });
 
-            setAgentStatus("running");
+      setAgentStatus("running");
       setRateLimitMs(null);
       setNetworkDropped(false);
       setRetryAttempt(0);
@@ -572,8 +522,6 @@ export function App() {
               status: "running",
             };
             activeToolCallsRef.current.set(toolId, toolCall);
-            // Communication tools return instantly — skip LivePreview to
-            // avoid a flashing "Running ask_question" / "Running send_message"
             if (toolName === "ask_question" || toolName === "send_message") {
               return;
             }
@@ -613,7 +561,6 @@ export function App() {
                 resultSummary = errMsg;
               }
             } else {
-              // run_command still needs stdout/stderr extracted for display
               if (toolName === "run_command") {
                 stdout = r.stdout as string | undefined;
                 stderr = r.stderr as string | undefined;
@@ -621,9 +568,6 @@ export function App() {
               resultSummary = getToolResultSummary(toolName, result);
             }
 
-            // send_message with a real message → render as a notice
-            // instead of a raw tool call row, so the user sees the
-            // actual message content styled properly
             if (toolName === "send_message" && "success" in r && r.success) {
               const uiMsg = r.ui_message as {
                 title?: string;
@@ -683,17 +627,12 @@ export function App() {
 
           onPermissionRequest: requestPermission,
 
-          // ── Typed event callbacks ──────────────────────────────
-
           onAgentEvent: (event: AgentEvent) => {
-            // Log every event as a system notice so the user can
-            // see what the agent is doing (retrying, waiting, etc.)
             if (event.kind === "server_error" || event.kind === "network_error") {
               pushNotice(`⚠ ${event.message}`);
             }
 
             if (isAgentPausedEvent(event)) {
-              // Stop the loading spinner and show the question UI
               setIsLoading(false); 
               setPendingQuestion({
                 question: event.question,
@@ -740,7 +679,6 @@ export function App() {
           },
 
           onError: (error: Error) => {
-            // Legacy fallback — only fires if no typed handler caught it
             flushAll();
             pushCompleted({
               id: nextId(),
@@ -754,7 +692,6 @@ export function App() {
 
         flushAll();
         conversationRef.current.addAssistantMessage(fullResponseRef.current);
-        // Token count now includes file context tokens for accurate display
         const histTokens = conversationRef.current.getHistoryTokens();
         const summary = contextManagerRef.current.getSummary(histTokens);
         setTokenCount(summary.used);
@@ -801,10 +738,9 @@ export function App() {
     pushNotice("Question cancelled. Type a message to continue.");
   }, [pushNotice]);
 
-    useInput((input, key) => {
-    if (key.ctrl && input === "c") exit();
+  useInput((input, key) => {
+    if (key.ctrl && input === "c") process.exit(0);
 
-    // R to retry after network drop — only active when dropped
     if ((input === "r" || input === "R") && networkDropped) {
       retryPressedRef.current = true;
       setNetworkDropped(false);
@@ -816,17 +752,19 @@ export function App() {
   const initialModel = useRef(currentModel);
 
   const staticItems = useMemo(
-    () => [
-      { kind: "welcome" as const },
-      ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
-    ],
+    () => {
+      if (completedMessages.length === 0) return [];
+      return [
+        { kind: "welcome" as const },
+        ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
+      ];
+    },
     [completedMessages]
   );
 
   const showLive =
     isLoading && (livePreview.text.length > 0 || livePreview.activeTool);
 
-  // We use a high max width to always track the real terminal width.
   const termWidth = useTerminalWidth(1000);
 
   return (
@@ -849,13 +787,14 @@ export function App() {
 
       {/* DYNAMIC region — wrapped in a single container so Ink treats it as one unit */}
       <Box flexDirection="column" width={Math.max(termWidth - 2, 20)}>
-        {pendingPermission && (
-          <Box marginX={1}>
-            <PermissionPrompt permission={pendingPermission} />
-          </Box>
+        {completedMessages.length === 0 && (
+          <WelcomeBanner
+            provider={currentProvider}
+            model={currentModel}
+          />
         )}
 
-        {!pendingPermission && showLive && (
+        {showLive && (
           <LivePreview
             text={livePreview.text}
             activeTool={livePreview.activeTool}
@@ -863,36 +802,26 @@ export function App() {
           />
         )}
 
-        {!pendingPermission && isLoading && !showLive && (
+        {isLoading && !showLive && (
           <LivePreview text="" activeTool={null} thinkingOnly />
         )}
 
-        {/* Render the Question Prompt if the agent paused */}
-        {pendingQuestion && (
-          <Box marginX={1}>
-            <QuestionPrompt
-              question={pendingQuestion.question}
-              options={pendingQuestion.options}
-              onSubmit={handleQuestionAnswer}
-              onCancel={handleQuestionCancel}
-            />
-          </Box>
-        )}
-
-        {/* Only show the standard InputBar if the agent is NOT asking a question */}
-        {!pendingQuestion && (
-          <Box marginTop={1} flexDirection="column">
-            <InputBar
-              onSubmit={handleSubmit}
-              isDisabled={isLoading || pendingPermission !== null || agentStatus === "retrying" || agentStatus === "rate_limited"}
-              placeholder={
-                pendingPermission
-                  ? "Waiting for permission response (y/n)..."
+        <Box marginTop={1} flexDirection="column">
+          <InputBar
+            onSubmit={handleSubmit}
+            isDisabled={isLoading || pendingPermission !== null || pendingQuestion !== null || agentStatus === "retrying" || agentStatus === "rate_limited"}
+            placeholder={
+              pendingQuestion 
+                ? "Waiting for question response..." 
+                : pendingPermission
+                  ? "Waiting for permission response..."
                   : 'Try "read package.json" or @src/index.ts'
-              }
+            }
               networkDropped={networkDropped}
               currentProviderId={currentProvider}
               currentModelId={currentModel}
+              currentThemeName={themeManager.getActiveTheme().name}
+              contextSummary={contextManagerRef.current.getSummary(conversationRef.current.getHistoryTokens())}
               onProviderConfirm={(provider) => {
                 setCurrentProvider(provider);
                 contextManagerRef.current.setProvider(provider);
@@ -902,10 +831,32 @@ export function App() {
                 setCurrentModel(model);
                 pushNotice(`Switched model to ${model}`);
               }}
+              onThemePreview={setCurrentThemeName}
+              onThemeConfirm={handleThemeConfirm}
+              onRemoveFile={(filePath) => {
+                contextManagerRef.current.removeFile(filePath);
+                setTokenCount((prev) => prev + 1 - 1); 
+              }}
               onMenuStateChange={setIsMenuOpen}
             />
+
+            {pendingPermission && (
+              <Box marginX={0} marginTop={1}>
+                <PermissionPrompt permission={pendingPermission} />
+              </Box>
+            )}
+
+            {pendingQuestion && (
+              <Box marginX={0} marginTop={1}>
+                <QuestionPrompt
+                  question={pendingQuestion.question}
+                  options={pendingQuestion.options}
+                  onSubmit={handleQuestionAnswer}
+                  onCancel={handleQuestionCancel}
+                />
+              </Box>
+            )}
           </Box>
-        )}
 
         {/* Status line — stays at the very bottom */}
         {!isMenuOpen && (

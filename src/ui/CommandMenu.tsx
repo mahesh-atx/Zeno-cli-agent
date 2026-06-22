@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { CommandMeta } from "../commands";
+import { Colors } from "../themes/colors";
 
 interface CommandMenuProps {
   items: Array<CommandMeta & { score?: number }>;
@@ -19,7 +20,7 @@ export function CommandMenu({
         flexDirection="column"
         paddingX={1}
       >
-        <Text color="gray" dimColor>
+        <Text color={Colors.Gray} dimColor>
           No matching commands
         </Text>
       </Box>
@@ -48,7 +49,7 @@ export function CommandMenu({
   return (
     <Box flexDirection="column" width="100%">
       <Box paddingX={1} flexDirection="column" marginBottom={1}>
-        <Text color="#ffb000" bold>Available commands</Text>
+        <Text color={Colors.AccentYellow} bold>Available commands</Text>
       </Box>
 
       {visible.map((cmd, i) => {
@@ -62,15 +63,15 @@ export function CommandMenu({
             width="100%"
             paddingX={1}
             flexDirection="row"
-            backgroundColor={isSelected ? "#ffb000" : undefined}
+            backgroundColor={isSelected ? (Colors.FocusBackground ?? Colors.AccentYellow) : undefined}
           >
             <Box width={leftColWidth}>
-              <Text color={isSelected ? "black" : "white"} bold={isSelected}>
+              <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Foreground} bold={isSelected}>
                 {isSelected ? "❯ " : "  "}{display}
               </Text>
             </Box>
             <Box>
-              <Text color={isSelected ? "black" : "gray"} dimColor={!isSelected}>
+              <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Gray} dimColor={!isSelected}>
                 {cmd.description}
               </Text>
             </Box>

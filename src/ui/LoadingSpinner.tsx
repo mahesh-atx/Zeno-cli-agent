@@ -1,6 +1,7 @@
 import React from "react";
 import { Text, Box } from "ink";
 import Spinner from "ink-spinner";
+import { Colors } from "../themes/colors";
 
 interface LoadingSpinnerProps {
   label?: string;
@@ -9,10 +10,10 @@ interface LoadingSpinnerProps {
 export function LoadingSpinner({ label = "Thinking…" }: LoadingSpinnerProps) {
   return (
     <Box>
-      <Text color="cyan">
+      <Text color={Colors.AccentCyan}>
         <Spinner type="dots" />
       </Text>
-      <Text color="dim"> {label}</Text>
+      <Text color={Colors.Gray}> {label}</Text>
     </Box>
   );
 }

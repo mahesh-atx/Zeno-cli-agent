@@ -9,8 +9,13 @@ import { searchFiles, getFileList } from "../utils/fileSearch";
 import type { FileEntry } from "../utils/fileSearch";
 import { ProviderMenu, PROVIDER_LIST } from "./ProviderMenu";
 import { ModelMenu } from "./ModelMenu";
+import { ThemeMenu } from "./ThemeMenu";
+import { StatusMenu } from "./StatusMenu";
 import type { ProviderName } from "../core/config";
+import type { ContextSummary } from "../core/context";
 import { getModelsForProvider } from "../providers";
+import { themeManager } from "../themes/theme-manager";
+import { Colors } from "../themes/colors";
 
 interface InputBarProps {
   onSubmit: (value: string) => void;
@@ -20,8 +25,13 @@ interface InputBarProps {
   networkDropped?: boolean;
   currentProviderId: ProviderName;
   currentModelId: string;
+  currentThemeName: string;
+  contextSummary: ContextSummary;
   onProviderConfirm: (provider: ProviderName) => void;
   onModelConfirm: (model: string) => void;
+  onThemePreview?: (themeName: string) => void;
+  onThemeConfirm: (themeName: string) => void;
+  onRemoveFile: (filePath: string) => void;
   onMenuStateChange?: (isOpen: boolean) => void;
 }
 
@@ -84,8 +94,13 @@ export function InputBar({
   networkDropped = false,
   currentProviderId,
   currentModelId,
+  currentThemeName,
+  contextSummary,
   onProviderConfirm,
   onModelConfirm,
+  onThemePreview,
+  onThemeConfirm,
+  onRemoveFile,
   onMenuStateChange,
 }: InputBarProps) {
   const [value, setValue] = useState("");
@@ -94,17 +109,19 @@ export function InputBar({
   
   const [showProviderPicker, setShowProviderPicker] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
 
   // ── Decide which menu (if any) to show ──
   const commandMenuVisible =
-    !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker && shouldShowCommandMenu(value);
+    !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker && !showThemePicker && !showStatusMenu && shouldShowCommandMenu(value);
 
-  const atQuery = !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker
+  const atQuery = !isDisabled && !menuClosed && !showProviderPicker && !showModelPicker && !showThemePicker && !showStatusMenu
     ? getActiveAtMentionQuery(value)
     : null;
   const fileMenuVisible = !commandMenuVisible && atQuery !== null;
 
-  const isMenuOpen = commandMenuVisible || fileMenuVisible || showProviderPicker || showModelPicker;
+  const isMenuOpen = showProviderPicker || showModelPicker || showThemePicker || showStatusMenu || commandMenuVisible || fileMenuVisible;
 
   useEffect(() => {
     if (onMenuStateChange) {
@@ -149,6 +166,22 @@ export function InputBar({
     }
     if (command === "/model") {
       setShowModelPicker(true);
+      setValue("");
+      return;
+    }
+    if (command === "/theme") {
+      const themes = themeManager.getAvailableThemes();
+      const currentIdx = themes.findIndex(t => t.name === currentThemeName);
+      setSelectedIndex(Math.max(0, currentIdx));
+      themeManager.startPreview(currentThemeName);
+      setShowThemePicker(true);
+      setValue("");
+      return;
+    }
+    const baseCmd = command.split(" ")[0];
+    if (baseCmd === "/context" || baseCmd === "/tokens" || baseCmd === "/status") {
+      setSelectedIndex(0);
+      setShowStatusMenu(true);
       setValue("");
       return;
     }
@@ -235,6 +268,77 @@ export function InputBar({
         }
       }
 
+      if (showThemePicker) {
+        const themes = themeManager.getAvailableThemes();
+        const len = themes.length;
+        if (key.upArrow) {
+          if (len > 0) {
+            const nextIdx = (selectedIndex - 1 + len) % len;
+            setSelectedIndex(nextIdx);
+            themeManager.preview(themes[nextIdx].name);
+            onThemePreview?.(themes[nextIdx].name);
+          }
+          return;
+        }
+        if (key.downArrow) {
+          if (len > 0) {
+            const nextIdx = (selectedIndex + 1) % len;
+            setSelectedIndex(nextIdx);
+            themeManager.preview(themes[nextIdx].name);
+            onThemePreview?.(themes[nextIdx].name);
+          }
+          return;
+        }
+        if (key.escape) {
+          themeManager.cancelPreview();
+          onThemePreview?.(themeManager.getActiveTheme().name);
+          setShowThemePicker(false);
+          setValue("");
+          return;
+        }
+        if (key.return) {
+          if (len > 0) {
+            const t = themes[Math.min(selectedIndex, len - 1)];
+            if (t) {
+              setShowThemePicker(false);
+              setValue("");
+              onThemeConfirm(t.name);
+            }
+          }
+          return;
+        }
+      }
+      
+      if (showStatusMenu) {
+        const len = contextSummary.files.length;
+        if (key.upArrow) {
+          if (len > 0) {
+            setSelectedIndex((prev) => (prev - 1 + len) % len);
+          }
+          return;
+        }
+        if (key.downArrow) {
+          if (len > 0) {
+            setSelectedIndex((prev) => (prev + 1) % len);
+          }
+          return;
+        }
+        if (key.escape) {
+          setShowStatusMenu(false);
+          setValue("");
+          return;
+        }
+        if (key.return) {
+          if (len > 0) {
+            const file = contextSummary.files[Math.min(selectedIndex, len - 1)];
+            onRemoveFile(file);
+          }
+          // Intentionally do not close the menu on file remove, so user can remove multiple files
+          return;
+        }
+        return;
+      }
+
       // ── Command menu navigation ──
       if (commandMenuVisible && filteredCommands.length > 0) {
         if (key.upArrow) {
@@ -286,6 +390,12 @@ export function InputBar({
 
       // ── Regular input ──
       if (key.return) {
+        if (key.meta) {
+          // Alt+Enter for multi-line
+          setValue((prev) => prev + "\n");
+          return;
+        }
+
         const trimmed = value.trim();
         if (trimmed === "/provider") {
           setShowProviderPicker(true);
@@ -294,6 +404,22 @@ export function InputBar({
         }
         if (trimmed === "/model") {
           setShowModelPicker(true);
+          setValue("");
+          return;
+        }
+        if (trimmed === "/theme") {
+          const themes = themeManager.getAvailableThemes();
+          const currentIdx = themes.findIndex(t => t.name === currentThemeName);
+          setSelectedIndex(Math.max(0, currentIdx));
+          themeManager.startPreview(currentThemeName);
+          setShowThemePicker(true);
+          setValue("");
+          return;
+        }
+        const baseCmd = trimmed.split(" ")[0];
+        if (baseCmd === "/context" || baseCmd === "/tokens" || baseCmd === "/status") {
+          setSelectedIndex(0);
+          setShowStatusMenu(true);
           setValue("");
           return;
         }
@@ -316,6 +442,11 @@ export function InputBar({
         return;
       }
 
+      if (key.ctrl && input === "n") {
+        setValue((prev) => prev + "\n");
+        return;
+      }
+
       if (input && !key.ctrl && !key.meta) {
         setValue((prev) => prev + input);
       }
@@ -332,10 +463,10 @@ export function InputBar({
       {/* Network drop retry prompt */}
       {networkDropped && (
         <Box paddingX={1}>
-          <Text color="red" bold>
+          <Text color={Colors.AccentRed} bold>
             ✖ Network connection lost.{" "}
           </Text>
-          <Text color="yellow" bold>
+          <Text color={Colors.AccentYellow} bold>
             Press R to retry.
           </Text>
         </Box>
@@ -344,20 +475,20 @@ export function InputBar({
       {/* Input box styled like kode-cli */}
       <Box
         width="100%"
-        backgroundColor="#222222" // DarkGray equivalent
+        backgroundColor={Colors.InputBackground ?? Colors.DarkGray}
       >
-        <Text color="magentaBright" bold>
+        <Text color={Colors.AccentPurple} bold>
           {" ❯ "}
         </Text>
         {value.length > 0 ? (
-          <Text color="white">
+          <Text color={Colors.Foreground}>
             {value}
-            <Text color="cyanBright">{cursor}</Text>
+            <Text color={Colors.AccentCyan}>{cursor}</Text>
           </Text>
         ) : (
           <Text>
-            <Text color="cyanBright">{cursor}</Text>
-            <Text dimColor>{placeholder}</Text>
+            <Text color={Colors.AccentCyan}>{cursor}</Text>
+            <Text color={Colors.Gray}>{placeholder}</Text>
           </Text>
         )}
       </Box>
@@ -373,6 +504,17 @@ export function InputBar({
       )}
       {showProviderPicker && (
         <ProviderMenu selectedIndex={selectedIndex} currentProviderId={currentProviderId} />
+      )}
+      {showThemePicker && (
+        <ThemeMenu selectedIndex={selectedIndex} />
+      )}
+      {showStatusMenu && (
+        <StatusMenu
+          selectedIndex={selectedIndex}
+          currentProviderId={currentProviderId}
+          currentModelId={currentModelId}
+          contextSummary={contextSummary}
+        />
       )}
       {commandMenuVisible && (
         <CommandMenu

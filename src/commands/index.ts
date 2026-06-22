@@ -267,6 +267,11 @@ export const COMMANDS: Array<CommandMeta & { handler: CommandHandler }> = [
     handler: () => ({ handled: true }), // Intercepted by InputBar UI
   },
   {
+    name: "/theme",
+    description: "Switch UI theme (live preview)",
+    handler: () => ({ handled: true }), // Intercepted by InputBar UI
+  },
+  {
     name: "/add",
     description: "Add a file to context window",
     usage: "/add <path>",

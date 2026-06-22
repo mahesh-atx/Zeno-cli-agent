@@ -1,0 +1,16 @@
+{
+  "name": "My Custom Theme",
+  "type": "dark",
+  "colors": {
+    "Background": "#121212",
+    "Foreground": "#e0e0e0",
+    "AccentBlue": "#82aaff",
+    "AccentPurple": "#c792ea",
+    "AccentGreen": "#c3e88d",
+    "AccentYellow": "#ffcb6b",
+    "AccentRed": "#f07178",
+    "Comment": "#616161",
+    "Gray": "#424242",
+    "DarkGray": "#212121"
+  }
+}

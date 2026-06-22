@@ -46,22 +46,24 @@ export interface SyntaxHighlighter {
  * hex string consumed by chalk (which supports truecolor). Tweak here to
  * re-theme without touching the renderer logic.
  */
+import { Colors } from "../themes/colors";
+
 export const PALETTE = {
-  heading1: "#7dd3fc", // light cyan — h1
-  heading2: "#fcd34d", // amber   — h2
-  heading3: "#c4b5fd", // violet  — h3+
-  strong: undefined, // bold, no hue shift
-  em: undefined, // italic, no hue shift
-  inlineCodeFg: "#1e1e2e",
-  inlineCodeBg: "#89b4fa", // catppuccin blue
-  blockquoteBar: "#6b7280", // gray
-  blockquoteText: undefined, // italic
-  link: "#60a5fa", // blue
-  hr: "#4b5563",
-  bullet: "#9ca3af",
-  tableBorder: "#4b5563",
-  codeBorder: "#4b5563",
-} as const;
+  get heading1() { return Colors.AccentCyan; },
+  get heading2() { return Colors.AccentYellow; },
+  get heading3() { return Colors.AccentPurple; },
+  strong: undefined,
+  em: undefined,
+  get inlineCodeFg() { return Colors.Background; },
+  get inlineCodeBg() { return Colors.AccentBlue; },
+  get blockquoteBar() { return Colors.Gray; },
+  blockquoteText: undefined,
+  get link() { return Colors.AccentBlue; },
+  get hr() { return Colors.DarkGray; },
+  get bullet() { return Colors.Comment; },
+  get tableBorder() { return Colors.DarkGray; },
+  get codeBorder() { return Colors.DarkGray; },
+};
 
 let markedConfigured = false;
 
@@ -107,6 +109,29 @@ function stringWidth(str: string): number {
   return [...stripAnsi(str)].length;
 }
 
+function hexToAnsiCode(hex: string): string {
+  if (!hex) return "";
+  return chalk.hex(hex)("X").split("X")[0] || "";
+}
+
+function remapSyntaxHighlightColors(str: string): string {
+  return str.replace(/\x1b\[(\d+)m/g, (match, p1) => {
+    const code = parseInt(p1, 10);
+    switch (code) {
+      case 31: return hexToAnsiCode(Colors.AccentRed);
+      case 32: return hexToAnsiCode(Colors.AccentGreen);
+      case 33: return hexToAnsiCode(Colors.AccentYellow);
+      case 34: return hexToAnsiCode(Colors.AccentBlue);
+      case 35: return hexToAnsiCode(Colors.AccentPurple);
+      case 36: return hexToAnsiCode(Colors.AccentCyan);
+      case 37: return hexToAnsiCode(Colors.Foreground);
+      case 39: return hexToAnsiCode(Colors.Foreground);
+      case 90: return hexToAnsiCode(Colors.Gray);
+      default: return match;
+    }
+  });
+}
+
 export function formatToken(
   token: Token,
   listDepth = 0,
@@ -135,7 +160,7 @@ export function formatToken(
         if (codeToken.lang && highlight.supportsLanguage(codeToken.lang)) {
           language = codeToken.lang;
         }
-        codeToRender = highlight.highlight(codeToken.text, { language });
+        codeToRender = remapSyntaxHighlightColors(highlight.highlight(codeToken.text, { language }));
       } else if (codeToken.lang) {
         language = codeToken.lang;
       }

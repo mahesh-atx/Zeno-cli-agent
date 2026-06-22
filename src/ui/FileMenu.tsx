@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { FileEntry } from "../utils/fileSearch";
+import { Colors } from "../themes/colors";
 
 interface FileMenuProps {
   items: FileEntry[];
@@ -22,7 +23,7 @@ export function FileMenu({
         flexDirection="column"
         paddingX={1}
       >
-        <Text color="gray" dimColor>
+        <Text color={Colors.Gray} dimColor>
           No files matching "{query}"
         </Text>
       </Box>
@@ -50,11 +51,11 @@ export function FileMenu({
       paddingX={1}
     >
       <Box>
-        <Text color="cyan" bold>📎 Attach file</Text>
+        <Text color={Colors.AccentCyan} bold>📎 Attach file</Text>
         {query && (
           <>
-            <Text color="gray"> · matching </Text>
-            <Text color="yellow">"{query}"</Text>
+            <Text color={Colors.Gray}> · matching </Text>
+            <Text color={Colors.AccentYellow}>"{query}"</Text>
           </>
         )}
       </Box>
@@ -67,18 +68,21 @@ export function FileMenu({
         const dirPart = file.dir && file.dir !== "." ? `${file.dir}/` : "";
 
         return (
-          <Box key={file.path}>
+          <Box
+            key={file.path}
+            width="100%"
+            flexDirection="row"
+            backgroundColor={isSelected ? (Colors.FocusBackground ?? Colors.AccentYellow) : undefined}
+          >
             <Text
-              color={isSelected ? "black" : "gray"}
-              backgroundColor={isSelected ? "cyan" : undefined}
+              color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Gray}
               dimColor={!isSelected}
             >
               {isSelected ? "❯ " : "  "}
               {dirPart}
             </Text>
             <Text
-              color={isSelected ? "black" : "white"}
-              backgroundColor={isSelected ? "cyan" : undefined}
+              color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Foreground}
               bold={isSelected}
             >
               {file.name}
@@ -88,7 +92,7 @@ export function FileMenu({
       })}
 
       <Box marginTop={0}>
-        <Text color="gray" dimColor>
+        <Text color={Colors.Gray} dimColor>
           {total > maxVisible ? `${selectedIndex + 1}/${total}  ·  ` : ""}
           ↑↓ navigate · Tab/Enter accept · Esc close
         </Text>

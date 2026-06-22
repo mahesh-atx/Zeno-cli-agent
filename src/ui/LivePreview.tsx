@@ -5,6 +5,7 @@ import { ToolOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
 import { renderStreaming } from "../utils/render";
+import { Colors } from "../themes/colors";
 
 interface LivePreviewProps {
   text: string;
@@ -21,11 +22,11 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
   if (thinkingOnly) {
     return (
       <Box marginTop={1} paddingX={1}>
-        <Text color="cyan">
+        <Text color={Colors.AccentCyan}>
           <Spinner type="dots" />
         </Text>
-        <Text color="cyan" bold> Thinking</Text>
-        <Text color="gray">…</Text>
+        <Text color={Colors.AccentCyan} bold> Thinking</Text>
+        <Text color={Colors.Gray}>…</Text>
       </Box>
     );
   }
@@ -34,10 +35,10 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
     return (
       <Box marginTop={1} paddingX={1} flexDirection="column">
         <Box>
-          <Text color="cyan">
+          <Text color={Colors.AccentCyan}>
             <Spinner type="dots" />
           </Text>
-          <Text color="cyan" bold> Running {activeTool.toolName}</Text>
+          <Text color={Colors.AccentCyan} bold> Running {activeTool.toolName}</Text>
         </Box>
       </Box>
     );
@@ -55,8 +56,8 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
     <Box marginTop={hideIcon ? 0 : 1} paddingX={1} flexDirection="column">
       {!hideIcon && (
         <Box>
-          <Text color="cyan" bold>✻ </Text>
-          <Text color="gray" dimColor>
+          <Text color={Colors.AccentCyan} bold>✻ </Text>
+          <Text color={Colors.Gray} dimColor>
             {hasOverflow
               ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${rawLines.length} lines)…`
               : "streaming…"}

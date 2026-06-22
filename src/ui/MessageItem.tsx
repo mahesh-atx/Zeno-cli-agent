@@ -4,6 +4,7 @@ import { ToolOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
 import { renderMarkdown, renderStreaming } from "../utils/render";
+import { Colors } from "../themes/colors";
 
 export type MessageRole = "user" | "assistant" | "error" | "system-notice";
 
@@ -24,7 +25,7 @@ function UserMessage({ content }: { content: string }) {
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box>
-        <Text color="green" bold>{"> "}</Text>
+        <Text color={Colors.AccentGreen} bold>{"> "}</Text>
         <Text wrap="wrap">{content}</Text>
       </Box>
     </Box>
@@ -49,31 +50,35 @@ function AssistantMessage({
     : "";
 
   return (
-    <Box flexDirection="row" marginTop={hideIcon ? 0 : 1}>
-      <Box width={2} flexShrink={0}>
-        {!hideIcon && <Text color="cyan" bold>✻ </Text>}
-      </Box>
+    <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
+      {toolCalls && toolCalls.length > 0 && (
+        <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
+          {toolCalls.map((tc) => (
+            <ToolOutput key={tc.id} toolCall={tc} />
+          ))}
+        </Box>
+      )}
 
-      <Box flexDirection="column">
-        {isStreaming && !content && <Text color="dim">thinking…</Text>}
-
-        {toolCalls && toolCalls.length > 0 && (
-          <Box flexDirection="column">
-            {toolCalls.map((tc) => (
-              <ToolOutput key={tc.id} toolCall={tc} />
-            ))}
+      {(content || isStreaming) && (
+        <Box flexDirection="row">
+          <Box width={2} flexShrink={0}>
+            {!hideIcon && <Text color={Colors.AccentCyan} bold>✻ </Text>}
           </Box>
-        )}
 
-        {rendered && (
           <Box flexDirection="column">
-            <Ansi wrap="wrap">
-              {rendered}
-              {isStreaming ? "\u258a" : ""}
-            </Ansi>
+            {isStreaming && !content && <Text color={Colors.Gray}>thinking…</Text>}
+
+            {rendered && (
+              <Box flexDirection="column">
+                <Ansi wrap="wrap">
+                  {rendered}
+                  {isStreaming ? "\u258a" : ""}
+                </Ansi>
+              </Box>
+            )}
           </Box>
-        )}
-      </Box>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -81,8 +86,8 @@ function AssistantMessage({
 function ErrorMessage({ content }: { content: string }) {
   return (
     <Box marginTop={1}>
-      <Text color="red">⚠ </Text>
-      <Text color="red" wrap="wrap">{content}</Text>
+      <Text color={Colors.AccentRed}>⚠ </Text>
+      <Text color={Colors.AccentRed} wrap="wrap">{content}</Text>
     </Box>
   );
 }
@@ -91,7 +96,7 @@ function SystemNotice({ content }: { content: string }) {
   return (
     <Box marginTop={1} flexDirection="column">
       {content.split("\n").map((line, i) => (
-        <Text key={i} color="gray" dimColor>{line}</Text>
+        <Text key={i} color={Colors.Gray}>{line}</Text>
       ))}
     </Box>
   );

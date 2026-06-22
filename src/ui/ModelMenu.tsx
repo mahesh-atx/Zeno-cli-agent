@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { ProviderName } from "../core/config";
+import { Colors } from "../themes/colors";
 
 interface ModelMenuProps {
   models: readonly string[];
@@ -26,7 +27,7 @@ export function ModelMenu({ models, selectedIndex, currentModelId, providerLabel
   return (
     <Box flexDirection="column" width="100%">
       <Box paddingX={1} flexDirection="column" marginBottom={1}>
-        <Text color="#ffb000" bold>Select model</Text>
+        <Text color={Colors.AccentYellow} bold>Select model</Text>
         <Text dimColor>Switch between {providerLabel} models. Applies to this session.</Text>
       </Box>
 
@@ -47,15 +48,15 @@ export function ModelMenu({ models, selectedIndex, currentModelId, providerLabel
             width="100%"
             paddingX={1}
             flexDirection="row"
-            backgroundColor={isSelected ? "#ffb000" : undefined}
+            backgroundColor={isSelected ? (Colors.FocusBackground ?? Colors.AccentYellow) : undefined}
           >
             <Box width={leftColWidth}>
-              <Text color={isSelected ? "black" : "white"} bold={isSelected}>
+              <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Foreground} bold={isSelected}>
                 {isSelected ? "❯ " : "  "}{idx + 1}. {m}{isCurrent ? " ✔" : ""}
               </Text>
             </Box>
             <Box>
-              <Text color={isSelected ? "black" : "gray"} dimColor={!isSelected}>
+              <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Gray} dimColor={!isSelected}>
                 Provider: {providerLabel}
               </Text>
             </Box>

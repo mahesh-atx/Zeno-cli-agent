@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
+import { Colors } from "../themes/colors";
 
 interface QuestionPromptProps {
   question: string;
@@ -36,33 +37,54 @@ export function QuestionPrompt({ question, options, onSubmit, onCancel }: Questi
   });
 
   return (
-    <Box flexDirection="column" padding={1} marginY={1}>
-      <Text color="yellow" bold>❓ Agent Question</Text>
-      <Box marginTop={1}>
-        <Text wrap="wrap">{question}</Text>
+    <Box
+      flexDirection="column"
+      width="100%"
+    >
+      <Box paddingX={1} flexDirection="column" marginBottom={1}>
+        <Text color={Colors.AccentYellow} bold>❓ Question</Text>
+      </Box>
+      <Box paddingX={1} flexDirection="column" marginBottom={1}>
+        <Text wrap="wrap" color={Colors.Foreground}>{question}</Text>
       </Box>
       
       {hasOptions ? (
-        <Box flexDirection="column" marginTop={1}>
-          {options.map((opt, i) => (
-            <Text key={i} color={i === selectedIndex ? "cyan" : "white"}>
-              {i === selectedIndex ? "❯ " : "  "}{opt}
-            </Text>
-          ))}
-          <Box marginTop={1}>
-            <Text dimColor>Use ↑/↓ to select, Enter to confirm, Esc to cancel</Text>
+        <Box flexDirection="column" width="100%">
+          {options.map((opt, i) => {
+            const isSelected = i === selectedIndex;
+            return (
+              <Box
+                key={i}
+                width="100%"
+                paddingX={1}
+                backgroundColor={isSelected ? (Colors.FocusBackground ?? Colors.AccentYellow) : undefined}
+              >
+                <Text
+                  color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Foreground}
+                  bold={isSelected}
+                >
+                  {isSelected ? "❯ " : "  "}
+                  {opt}
+                </Text>
+              </Box>
+            );
+          })}
+          <Box marginTop={1} paddingX={1}>
+            <Text dimColor>Enter to confirm · Esc to exit</Text>
           </Box>
         </Box>
       ) : (
-        <Box marginTop={1}>
-          <Text color="cyan">Answer: </Text>
-          <TextInput 
-            value={value} 
-            onChange={setValue} 
-            placeholder="Type your answer and press Enter..." 
-          />
-          <Box marginLeft={2}>
-            <Text dimColor>(Esc to cancel)</Text>
+        <Box flexDirection="column" width="100%" paddingX={1}>
+          <Box>
+            <Text color={Colors.AccentCyan} bold>❯ </Text>
+            <TextInput 
+              value={value} 
+              onChange={setValue} 
+              placeholder="Type your answer..." 
+            />
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>Enter to confirm · Esc to exit</Text>
           </Box>
         </Box>
       )}

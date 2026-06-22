@@ -55,12 +55,12 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box marginLeft={2}>
+      <Box marginLeft={0}>
         <StatusIcon status={status} />
         <Text color="white" bold>
           {"  "}{formattedName}
         </Text>
-        {inputSummary && (
+        {inputSummary && toolName !== "ask_question" && (
           <Text dimColor>
             {"  "}{inputSummary}
           </Text>
@@ -68,7 +68,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
       </Box>
 
       {resultSummary && status !== "running" && (
-        <Box marginLeft={8}>
+        <Box marginLeft={4}>
           <Text dimColor>└  </Text>
           <Text color="white">
             {resultSummary}
@@ -77,7 +77,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
       )}
 
       {stdout && stdout.trim() && (
-        <Box flexDirection="column" marginLeft={11} marginTop={0}>
+        <Box flexDirection="column" marginLeft={7} marginTop={0}>
           {stdout
             .trim()
             .split("\n")
@@ -96,7 +96,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
       )}
 
       {stderr && stderr.trim() && (
-        <Box flexDirection="column" marginLeft={11}>
+        <Box flexDirection="column" marginLeft={7}>
           {stderr
             .trim()
             .split("\n")
