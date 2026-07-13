@@ -53,7 +53,7 @@ function StatusIcon({ status }: { status: ToolStatus }) {
   }
 }
 
-// ─── Read Many Files — parallel UI ──────────────────────────────────────────
+// ─── Read Many Files ──────────────────────────────────────────────────────────
 function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
   const input = toolCall.input as { paths?: string[] };
   const raw = toolCall.rawResult as any;
@@ -66,47 +66,41 @@ function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
 
   if (toolCall.status === "running") {
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status="running" /><Text color="white" bold> Read {totalFiles} files</Text></Box>
-        <Box marginLeft={4}><Text dimColor>└  Reading {paths.slice(0, 3).join(", ")}{totalFiles > 3 ? ` +${totalFiles - 3} more` : ""}...</Text></Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status="running" /><Text color="white" bold> Read {totalFiles} files</Text></Text>
+        <Text dimColor>   └  Reading {paths.slice(0, 3).join(", ")}{totalFiles > 3 ? ` +${totalFiles - 3} more` : ""}...</Text>
       </Box>
     );
   }
 
   if (!isExpanded) {
-    const firstThree = displayFiles.slice(0, 3).map(f => (f.path.split("/").pop() || f.path));
+    const firstThree = displayFiles.slice(0, 3).map(f => f.path.split("/").pop() || f.path);
     const remaining = displayFiles.length - 3;
     const fileList = remaining > 0 ? `${firstThree.join(", ")} +${remaining} more` : firstThree.join(", ");
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{fileList}</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{fileList}</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text><Text dimColor> ({totalFiles} requested)</Text></Box>
-      <Box marginLeft={4} flexDirection="column">
-        {displayFiles.map((file, idx) => {
-          const isLast = idx === displayFiles.length - 1;
-          const icon = file.success ? "✓" : "✗";
-          const color = file.success ? Colors.AccentGreen : Colors.AccentRed;
-          return (
-            <Box key={idx}><Text dimColor>{isLast ? "└  " : "├  "}</Text><Text color={color}>{icon} </Text><Text color="white">{file.path}</Text>{file.success && file.lines !== undefined && <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens}` : ""})</Text>}{!file.success && file.error && <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>}</Box>
-          );
-        })}
-        <Box marginTop={0} marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-      </Box>
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text><Text dimColor> ({totalFiles} requested)</Text></Text>
+      {displayFiles.map((file, idx) => {
+        const isLast = idx === displayFiles.length - 1;
+        const icon = file.success ? "✓" : "✗";
+        const color = file.success ? Colors.AccentGreen : Colors.AccentRed;
+        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color={color}>{icon} </Text><Text color="white">{file.path}</Text>{file.success && file.lines !== undefined && <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens}` : ""})</Text>}{!file.success && file.error && <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>}</Text>;
+      })}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
 
-// ─── List Files — expandable ────────────────────────────────────────────────
+// ─── List Files ───────────────────────────────────────────────────────────────
 function ListFilesOutput({ toolCall }: { toolCall: ToolCall }) {
   const raw = toolCall.rawResult as any;
   const entries = (raw?.entries || []) as string[];
@@ -114,40 +108,29 @@ function ListFilesOutput({ toolCall }: { toolCall: ToolCall }) {
   const pathArg = (toolCall.input as any).path || ".";
 
   if (toolCall.status === "running") {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status="running" /><Text color="white" bold> Search ({pathArg})</Text></Box>
-      </Box>
-    );
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Search ({pathArg})</Text></Text></Box>;
   }
 
-  const collapsed = entries.slice(0, 5);
-  const remaining = entries.length - 5;
-
   if (!isExpanded) {
+    const collapsed = entries.slice(0, 5).map(e => e.replace(/^\[.*?\]\s+/, "").split(" ")[0]);
+    const remaining = entries.length - 5;
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Search</Text><Text color="white" bold>{` (${pathArg})`}</Text>{entries.length > 0 && <Text color="white"> — {entries.length} items</Text>}</Box>
-        {entries.length > 0 && (
-          <Box marginLeft={4} flexDirection="column">
-            <Box><Text dimColor>└  </Text><Text color="white">{collapsed.map(e => e.replace(/^\[.*?\]\s+/, "").split(" ")[0]).join(", ")}{remaining > 0 ? ` +${remaining} more` : ""}</Text></Box>
-            {entries.length > 5 && <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>}
-          </Box>
-        )}
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pathArg})</Text>{entries.length > 0 && <Text color="white"> — {entries.length} items</Text>}</Text>
+        {entries.length > 0 && <Text><Text dimColor>   └  </Text><Text color="white">{collapsed.join(", ")}{remaining > 0 ? ` +${remaining} more` : ""}</Text></Text>}
+        {entries.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pathArg})</Text><Text color="white"> — {entries.length} items</Text></Box>
-      <Box marginLeft={4} flexDirection="column">
-        {entries.map((e, idx) => {
-          const isLast = idx === entries.length - 1;
-          return <Box key={idx}><Text dimColor>{isLast ? "└  " : "├  "}</Text><Text color="white">{e}</Text></Box>;
-        })}
-        <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-      </Box>
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pathArg})</Text><Text color="white"> — {entries.length} items</Text></Text>
+      {entries.map((e, idx) => {
+        const isLast = idx === entries.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{e}</Text></Text>;
+      })}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -161,41 +144,28 @@ function GlobFilesOutput({ toolCall }: { toolCall: ToolCall }) {
   const pattern = (toolCall.input as any).pattern || "**";
 
   if (toolCall.status === "running") {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status="running" /><Text color="white" bold> Search ({pattern})</Text></Box>
-      </Box>
-    );
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Search ({pattern})</Text></Text></Box>;
   }
 
   if (!isExpanded && files.length > 5) {
     const first = files.slice(0, 3).map(f => f.split("/").pop()).join(", ");
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Search</Text><Text color="white" bold>{` (${pattern})`}</Text><Text color="white"> — {total ?? files.length} matches</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{first} +{files.length - 3} more</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pattern})</Text><Text color="white"> — {total ?? files.length} matches</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{first} +{files.length - 3} more</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pattern})</Text><Text color="white"> — {total ?? files.length} matches{(raw?.truncated ? " (truncated)" : "")}</Text></Box>
-      {isExpanded && (
-        <Box marginLeft={4} flexDirection="column">
-          {files.map((f, idx) => {
-            const isLast = idx === files.length - 1;
-            return <Box key={idx}><Text dimColor>{isLast ? "└  " : "├  "}</Text><Text color="white">{f}</Text></Box>;
-          })}
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-        </Box>
-      )}
-      {!isExpanded && files.length <= 5 && files.length > 0 && (
-        <Box marginLeft={4}><Text dimColor>└  </Text><Text color="white">{files.map(f => f.split("/").pop()).join(", ")}</Text></Box>
-      )}
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pattern})</Text><Text color="white"> — {total ?? files.length} matches{(raw?.truncated ? " (truncated)" : "")}</Text></Text>
+      {isExpanded ? files.map((f, idx) => {
+        const isLast = idx === files.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{f}</Text></Text>;
+      }) : files.length > 0 && files.length <= 5 && <Text><Text dimColor>   └  </Text><Text color="white">{files.map(f => f.split("/").pop()).join(", ")}</Text></Text>}
+      {isExpanded && <Text dimColor>      (ctrl+r to collapse)</Text>}
     </Box>
   );
 }
@@ -209,36 +179,28 @@ function SearchFilesOutput({ toolCall }: { toolCall: ToolCall }) {
   const query = (toolCall.input as any).query || "";
 
   if (toolCall.status === "running") {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status="running" /><Text color="white" bold> Grep "{query}"</Text></Box>
-      </Box>
-    );
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Grep "{query}"</Text></Text></Box>;
   }
 
   if (!isExpanded && matches.length > 3) {
     const preview = matches.slice(0, 2).map(m => `${m.file.split("/").pop()}:${m.line}`).join(", ");
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{preview} +{matches.length - 2} more</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{preview} +{matches.length - 2} more</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Box>
-      <Box marginLeft={4} flexDirection="column">
-        {(isExpanded ? matches : matches.slice(0, 5)).map((m, idx, arr) => {
-          const isLast = idx === arr.length - 1;
-          return <Box key={idx}><Text dimColor>{isLast ? "└  " : "├  "}</Text><Text color="white">{m.file}:{m.line}</Text><Text dimColor> — {m.content.slice(0, 50)}</Text></Box>;
-        })}
-        {isExpanded ? <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box> : matches.length > 5 && <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>}
-      </Box>
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Text>
+      {(isExpanded ? matches : matches.slice(0, 5)).map((m, idx, arr) => {
+        const isLast = idx === arr.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{m.file}:{m.line}</Text><Text dimColor> — {m.content.slice(0, 50)}</Text></Text>;
+      })}
+      {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : matches.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
     </Box>
   );
 }
@@ -254,37 +216,27 @@ function ReadFileOutput({ toolCall }: { toolCall: ToolCall }) {
   const size = raw?.size as number | undefined;
 
   if (toolCall.status === "running") {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status="running" /><Text color="white" bold> Read ({pathArg})</Text></Box>
-      </Box>
-    );
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Read ({pathArg})</Text></Text></Box>;
   }
 
   if (!isExpanded) {
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read</Text><Text color="white" bold>{` (${pathArg})`}</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text><Text color="white"> — {lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Box>
-      {content && (
-        <Box marginLeft={4} flexDirection="column">
-          {content.split("\n").slice(0, 15).map((line, idx, arr) => (
-            <Box key={idx}><Text dimColor>{idx === arr.length - 1 || idx === 14 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Box>
-          ))}
-          {content.split("\n").length > 15 && <Box marginLeft={0}><Text dimColor>   ... {content.split("\n").length - 15} more lines</Text></Box>}
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-        </Box>
-      )}
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text><Text color="white"> — {lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Text>
+      {content && content.split("\n").slice(0, 15).map((line, idx, arr) => (
+        <Text key={idx}><Text dimColor>   {idx === arr.length - 1 || idx === 14 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Text>
+      ))}
+      {content && content.split("\n").length > 15 && <Text dimColor>      ... {content.split("\n").length - 15} more lines</Text>}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -298,27 +250,15 @@ function GitStatusOutput({ toolCall }: { toolCall: ToolCall }) {
   const output = raw?.output as string | undefined;
 
   if (toolCall.status === "running") {
-    return <Box flexDirection="column" marginTop={1}><Box><StatusIcon status="running" /><Text color="white" bold> Git status</Text></Box></Box>;
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git status</Text></Text></Box>;
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git status{branch ? ` (${branch})` : ""}</Text>{isClean !== undefined && <Text color={isClean ? Colors.AccentGreen : Colors.AccentYellow}> {isClean ? "clean" : "dirty"}</Text>}</Box>
-      {isClean === false && !isExpanded && output && (
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{output.split("\n").slice(0, 3).join(", ").slice(0, 80)}...</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
-      )}
-      {isExpanded && output && (
-        <Box marginLeft={4} flexDirection="column">
-          {output.split("\n").slice(0, 20).map((line: string, idx: number) => (
-            <Box key={idx}><Text dimColor>{idx === 19 ? "└  " : "├  "}</Text><Text color="white">{line}</Text></Box>
-          ))}
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-        </Box>
-      )}
-      {!isExpanded && isClean && <Box marginLeft={4}><Text dimColor>└  </Text><Text color="white">clean working tree</Text></Box>}
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git status{branch ? ` (${branch})` : ""}</Text>{isClean !== undefined && <Text color={isClean ? Colors.AccentGreen : Colors.AccentYellow}> {isClean ? "clean" : "dirty"}</Text>}</Text>
+      {isClean === false && !isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 3).join(", ").slice(0, 80)}...</Text></Text><Text dimColor>      (ctrl+r to expand)</Text></>}
+      {isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 20).join("\n   ")}</Text></Text><Text dimColor>      (ctrl+r to collapse)</Text></>}
+      {!isExpanded && isClean && <Text><Text dimColor>   └  </Text><Text color="white">clean working tree</Text></Text>}
     </Box>
   );
 }
@@ -330,35 +270,31 @@ function GitDiffOutput({ toolCall }: { toolCall: ToolCall }) {
   const isEmpty = raw?.isEmpty;
 
   if (toolCall.status === "running") {
-    return <Box flexDirection="column" marginTop={1}><Box><StatusIcon status="running" /><Text color="white" bold> Git diff</Text></Box></Box>;
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git diff</Text></Text></Box>;
   }
 
   if (isEmpty) {
-    return <Box flexDirection="column" marginTop={1}><Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text><Text color="white"> — no changes</Text></Box></Box>;
+    return <Box flexDirection="column"><Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text><Text color="white"> — no changes</Text></Text></Box>;
   }
 
   if (!isExpanded) {
     const preview = diff ? diff.split("\n").slice(0, 2).join(" ").slice(0, 80) : "diff";
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          <Box><Text dimColor>└  </Text><Text color="white">{preview}...</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{preview}...</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text></Box>
-      <Box marginLeft={4} flexDirection="column">
-        {(diff ? diff.split("\n").slice(0, 30) : []).map((line: string, idx: number) => (
-          <Box key={idx}><Text dimColor>{idx === 29 ? "└  " : "├  "}</Text><Text color={line.startsWith("+") ? Colors.AccentGreen : line.startsWith("-") ? Colors.AccentRed : "white"}>{line.slice(0, 100)}</Text></Box>
-        ))}
-        <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
-      </Box>
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text></Text>
+      {(diff ? diff.split("\n").slice(0, 30) : []).map((line: string, idx: number) => (
+        <Text key={idx}><Text dimColor>   {idx === 29 ? "└  " : "├  "}</Text><Text color={line.startsWith("+") ? Colors.AccentGreen : line.startsWith("-") ? Colors.AccentRed : "white"}>{line.slice(0, 100)}</Text></Text>
+      ))}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -370,35 +306,31 @@ function GitLogOutput({ toolCall }: { toolCall: ToolCall }) {
   const isExpanded = toolCall.isExpanded || false;
 
   if (toolCall.status === "running") {
-    return <Box flexDirection="column" marginTop={1}><Box><StatusIcon status="running" /><Text color="white" bold> Git log</Text></Box></Box>;
+    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git log</Text></Text></Box>;
   }
 
   const lines = log ? log.split("\n") : [];
 
   if (!isExpanded && lines.length > 4) {
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git log</Text><Text color="white"> — {count ?? lines.length} commits</Text></Box>
-        <Box marginLeft={4} flexDirection="column">
-          {lines.slice(0, 3).map((line: string, idx: number) => (
-            <Box key={idx}><Text dimColor>├  </Text><Text color="white">{line.slice(0, 80)}</Text></Box>
-          ))}
-          <Box><Text dimColor>└  </Text><Text color="white">+{lines.length - 3} more</Text></Box>
-          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
-        </Box>
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git log</Text><Text color="white"> — {count ?? lines.length} commits</Text></Text>
+        {lines.slice(0, 3).map((line: string, idx: number) => (
+          <Text key={idx}><Text dimColor>   ├  </Text><Text color="white">{line.slice(0, 80)}</Text></Text>
+        ))}
+        <Text><Text dimColor>   └  </Text><Text color="white">+{lines.length - 3} more</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Git log</Text><Text color="white"> — {count ?? lines.length} commits</Text></Box>
-      <Box marginLeft={4} flexDirection="column">
-        {(isExpanded ? lines : lines.slice(0, 5)).map((line: string, idx: number, arr: string[]) => (
-          <Box key={idx}><Text dimColor>{idx === arr.length - 1 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Box>
-        ))}
-        {isExpanded ? <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box> : lines.length > 5 && <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>}
-      </Box>
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git log</Text><Text color="white"> — {count ?? lines.length} commits</Text></Text>
+      {(isExpanded ? lines : lines.slice(0, 5)).map((line: string, idx: number, arr: string[]) => (
+        <Text key={idx}><Text dimColor>   {idx === arr.length - 1 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Text>
+      ))}
+      {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : lines.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
     </Box>
   );
 }
@@ -439,54 +371,44 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
   const targetPath = String(input.path || input.file || "file");
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box marginLeft={0}>
-        <StatusIcon status={status} />
-        <Text color="white" bold> {userFacingName}</Text>
-        {inputSummary ? <Text color="white" bold>{inputSummary}</Text> : null}
-      </Box>
-
+    <Box flexDirection="column">
+      <Text><StatusIcon status={status} /><Text color="white" bold> {userFacingName}</Text>{inputSummary ? <Text color="white" bold>{inputSummary}</Text> : null}</Text>
       {status !== "running" && toolCall.hunks && isWrite && (
-        <Box flexDirection="column" marginLeft={4}>
-          <Box><Text dimColor>└  </Text><Text color="white">Created {targetPath}</Text></Box>
-          <Box><Text dimColor>└    </Text><Text color="white">Added {addedLines} lines</Text></Box>
-        </Box>
+        <>
+          <Text><Text dimColor>   └  </Text><Text color="white">Created {targetPath}</Text></Text>
+          <Text><Text dimColor>      └  </Text><Text color="white">Added {addedLines} lines</Text></Text>
+        </>
       )}
-
       {status !== "running" && toolCall.hunks && isUpdate && (
-        <Box flexDirection="column" marginLeft={4}>
-          <Box><Text dimColor>└  </Text><Text color="white">Updated {targetPath} with {addedLines} additions and {removedLines} removals</Text></Box>
-          <Box><Text dimColor>└    </Text><Text color="white">Added {addedLines}, Removed {removedLines}</Text></Box>
-        </Box>
+        <>
+          <Text><Text dimColor>   └  </Text><Text color="white">Updated {targetPath} with {addedLines} additions and {removedLines} removals</Text></Text>
+          <Text><Text dimColor>      └  </Text><Text color="white">Added {addedLines}, Removed {removedLines}</Text></Text>
+        </>
       )}
-
       {status !== "running" && (!toolCall.hunks || (!isWrite && !isUpdate)) && resultSummary && (
-        <Box marginLeft={4}><Text dimColor>└  </Text><Text color="white">{resultSummary}</Text></Box>
+        <Text><Text dimColor>   └  </Text><Text color="white">{resultSummary}</Text></Text>
       )}
-
       {toolCall.hunks && toolCall.hunks.length > 0 && (
-        <Box marginLeft={7} marginTop={1}>
+        <Box marginTop={1} marginLeft={3}>
           <StructuredDiffList hunks={toolCall.hunks} filePath={String(input.path || input.file || "file")} />
         </Box>
       )}
-
       {!toolCall.hunks && stdout && stdout.trim() && (
-        <Box flexDirection="column" marginLeft={7} marginTop={0}>
+        <>
           {stdout.trim().split("\n").slice(0, 15).map((line, i) => {
-            if (line.startsWith("+")) return <Text key={i} backgroundColor={Colors.DiffAdded} color={Colors.Background}>{line}</Text>;
-            if (line.startsWith("-")) return <Text key={i} backgroundColor={Colors.DiffRemoved} color={Colors.Background}>{line}</Text>;
-            return <Text key={i} dimColor>{line}</Text>;
+            if (line.startsWith("+")) return <Text key={i} backgroundColor={Colors.DiffAdded} color={Colors.Background}>      {line}</Text>;
+            if (line.startsWith("-")) return <Text key={i} backgroundColor={Colors.DiffRemoved} color={Colors.Background}>      {line}</Text>;
+            return <Text key={i} dimColor>      {line}</Text>;
           })}
-          {stdout.trim().split("\n").length > 15 && <Text dimColor>... ({stdout.trim().split("\n").length - 15} more)</Text>}
-        </Box>
+          {stdout.trim().split("\n").length > 15 && <Text dimColor>      ... ({stdout.trim().split("\n").length - 15} more)</Text>}
+        </>
       )}
-
       {stderr && stderr.trim() && (
-        <Box flexDirection="column" marginLeft={7}>
+        <>
           {stderr.trim().split("\n").slice(0, 10).map((line, i) => (
-            <Text key={i} color={status === "error" ? "red" : "yellow"}>{line}</Text>
+            <Text key={i} color={status === "error" ? "red" : "yellow"}>      {line}</Text>
           ))}
-        </Box>
+        </>
       )}
     </Box>
   );
