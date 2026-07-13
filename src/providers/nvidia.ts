@@ -1,37 +1,24 @@
-// src/providers/nvidia.ts
-import { createOpenAI } from "@ai-sdk/openai";
+// src/providers/nvidia.ts — delegates to registry
 import { streamText } from "ai";
 import type { Message } from "../core/conversation";
 import type { Config } from "../core/config";
 import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
+import { providerRegistry, NVIDIA_MODELS as REGISTRY_MODELS, NVIDIA_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
-// ━━━ Available NVIDIA Models ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export const NVIDIA_MODELS = REGISTRY_MODELS;
+export const NVIDIA_DEFAULT_MODEL = REGISTRY_DEFAULT;
 
-export const NVIDIA_MODELS = [
-  "nvidia/llama-3.1-nemotron-70b-instruct",
-  "nvidia/llama-3.3-70b-instruct",
-  "meta/llama-3.1-8b-instruct",
-  "meta/llama-3.1-70b-instruct",
-  "mistralai/mixtral-8x7b-instruct-v0.1",
-] as const;
-
-export const NVIDIA_DEFAULT_MODEL = "nvidia/llama-3.1-nemotron-70b-instruct";
-
-// ━━━ NVIDIA NIM Client ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/**
- * Returns a StreamResult on success.
- * On failure, returns a typed AgentEvent — never throws to console.
- */
 export async function chatWithNvidia(
   messages: Message[],
   model: string,
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  if (!config.nvidiaApiKey) {
+  const def = providerRegistry.nvidia;
+  const apiKey = def.getApiKey(config);
+  if (!apiKey) {
     return {
       kind: "auth_error",
       message: "NVIDIA_API_KEY is not set. Add it to your .env file.",
@@ -43,24 +30,19 @@ export async function chatWithNvidia(
     };
   }
 
-  const nvidia = createOpenAI({
-    apiKey: config.nvidiaApiKey,
-    baseURL: "https://integrate.api.nvidia.com/v1",
-  });
-
   const formattedMessages = messages.map((msg) => ({
     role: msg.role as "system" | "user" | "assistant",
     content: msg.content,
   }));
 
   try {
+    const modelInstance = def.createModel(apiKey, model);
     const result = streamText({
-      model: nvidia(model),
-      messages: formattedMessages,
+      model: modelInstance,
+      messages: formattedMessages as any,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
     });
-
     return { stream: result.textStream };
   } catch (error) {
     return translateProviderError("nvidia", error, attempt);

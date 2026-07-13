@@ -1,5 +1,5 @@
 // src/tools/index.ts
-import { z, ZodError } from "zod";
+import { z, ZodError, ZodObject, ZodRawShape } from "zod";
 
 import { ReadFileSchema, readFile } from "./readFile";
 import { WriteFileSchema, writeFile } from "./writeFile";
@@ -17,7 +17,7 @@ import { AskQuestionSchema, askQuestion } from "./askQuestion";
 import { SendMessageSchema, sendMessage } from "./sendMessage";
 import { ApplyPatchSchema, applyPatch } from "./applyPatch";
 
-// ━━━ Tool Definition ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── Tool Definition ─────────────────────────────────────────────────────────
 
 export interface ToolDefinition {
   name: string;
@@ -26,38 +26,34 @@ export interface ToolDefinition {
   execute: (input: unknown) => Promise<unknown>;
 }
 
-// ━━━ Tool Wrapper ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── Tool Wrapper ────────────────────────────────────────────────────────────
 
-function wrapExecute(
+function wrapExecute<Schema extends ZodObject<ZodRawShape>, Output>(
   name: string,
-  fn: (input: unknown) => Promise<unknown>
+  schema: Schema,
+  fn: (input: z.infer<Schema>) => Promise<Output>
 ): (input: unknown) => Promise<unknown> {
-  return async (input: unknown) => {
+  return async (rawInput: unknown) => {
     try {
-      const result = await fn(input);
+      // 1. Parse once in wrapper (single source of validation)
+      const parsed = schema.parse(rawInput) as z.infer<Schema>;
+      const result = await fn(parsed);
 
-      // MODERN UPGRADE 1: AI SDK Hint Injection
-      // The Vercel AI SDK will JSON.stringify this result. 
-      // We inject a highly visible text block so the LLM's attention 
-      // mechanism prioritizes the hints over raw JSON keys.
+      // Hint injection for LLM attention
       if (result && typeof result === "object" && "hints" in result) {
-        const res = result as any;
-        if (Array.isArray(res.hints) && res.hints.length > 0) {
-          res._agent_instructions = [
+        const res = result as Record<string, unknown>;
+        if (Array.isArray(res.hints) && (res.hints as string[]).length > 0) {
+          (res as any)._agent_instructions = [
             "=== SYSTEM HINTS ===",
-            ...res.hints.map((h: string) => `* ${h}`),
+            ...(res.hints as string[]).map((h: string) => `* ${h}`),
             "====================",
-            "Action Required: Read these hints and adjust your next tool call accordingly. Do not ask the user for help."
+            "Action Required: Read these hints and adjust your next tool call accordingly. Do not ask the user for help.",
           ].join("\n");
         }
       }
 
       return result;
     } catch (error) {
-      
-      // MODERN UPGRADE 2: Zod Schema Enforcement
-      // If the LLM provides invalid JSON arguments, catch the ZodError 
-      // and translate it into a self-correcting instruction.
       if (error instanceof ZodError) {
         const formattedErrors = error.issues.map((issue) => {
           const field = issue.path.length > 0 ? issue.path.join(".") : "root object";
@@ -66,170 +62,130 @@ function wrapExecute(
 
         return {
           success: false,
-          error: `Invalid arguments provided to '${name}'.`,
+          error: `Invalid arguments for '${name}'.`,
           _agent_instructions: [
             `SCHEMA VIOLATION: Your JSON arguments for '${name}' were invalid.`,
             formattedErrors,
             "",
-            "Please correct your tool call parameters and try again. Do not ask the user for help."
-          ].join("\n")
+            "Please correct your tool call parameters and try again. Do not ask the user for help.",
+          ].join("\n"),
         };
       }
-
-      // OS-level or unexpected exception → clean result for LLM
       return catchToolError(name, error);
     }
   };
 }
 
-// ━━━ Tool Registry ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── Tool Registry ───────────────────────────────────────────────────────────
 
 export const TOOLS: ToolDefinition[] = [
   {
     name: "read_file",
-    // MODERN UPGRADE 3: Synced Description
     description:
-      "Read file contents. Auto-corrects minor path typos. If file is missing, returns directory contents so you can find the correct path without calling list_files.",
+      "Read file contents. Auto-corrects minor path typos. Guards: blocks binary, oversize (>5MB), outside project root, protected dirs (node_modules, .git). Returns directory listing if path is a directory. Use startLine/endLine to read slices of large files.",
     schema: ReadFileSchema,
-    execute: wrapExecute("read_file", async (input) => {
-      const parsed = ReadFileSchema.parse(input);
-      return readFile(parsed);
-    }),
+    execute: wrapExecute("read_file", ReadFileSchema, readFile as any),
   },
   {
     name: "write_file",
     description:
-      "Write or overwrite a file. Creates parent directories. Blocks protected paths (node_modules, .git). Never use this to delete a file.",
+      "Write or overwrite a file. Creates parent directories. Blocks protected paths and outside-project writes. Max 2MB. Atomic write (temp+rename). Never use to delete a file.",
     schema: WriteFileSchema,
-    execute: wrapExecute("write_file", async (input) => {
-      const parsed = WriteFileSchema.parse(input);
-      return writeFile(parsed);
-    }),
+    execute: wrapExecute("write_file", WriteFileSchema, writeFile as any),
   },
   {
     name: "edit_file",
     description:
-      "Edit a file by replacing an exact string. Auto-corrects whitespace/indentation mismatches. Refuses mass-replacements to protect file integrity.",
+      "Edit a file by replacing an exact string (must be unique). Whitespace-tolerant auto-correct, rejects trivial single-char matches and mass-replacements. Max resulting file 2MB. Always read_file first.",
     schema: EditFileSchema,
-    execute: wrapExecute("edit_file", async (input) => {
-      const parsed = EditFileSchema.parse(input);
-      return editFile(parsed);
-    }),
+    execute: wrapExecute("edit_file", EditFileSchema, editFile as any),
   },
   {
     name: "list_files",
     description:
-      "List top-level files and directories. Automatically ignores junk (node_modules, .git) to save context. Use this to orient yourself in a new project.",
+      "List files and directories (top-level by default, recursive optional). Respects .gitignore, ignores junk (node_modules, .git). Blocks outside root and protected. Use to orient in new project.",
     schema: ListFilesSchema,
-    execute: wrapExecute("list_files", async (input) => {
-      const parsed = ListFilesSchema.parse(input);
-      return listFiles(parsed);
-    }),
+    execute: wrapExecute("list_files", ListFilesSchema, listFiles as any),
   },
   {
     name: "run_command",
     description:
-      "Run a shell command (60s timeout). Truncates massive outputs to protect context window. Provides smart hints on compilation or test failures.",
+      "Run a shell command (default 60s timeout, max 120s). Blocks destructive commands (rm -rf /, fork bomba, curl|sh, mkfs). Truncates massive outputs to protect context. Provides hints on compilation/test failures.",
     schema: RunCommandSchema,
-    execute: wrapExecute("run_command", async (input) => {
-      const parsed = RunCommandSchema.parse(input);
-      return runCommand(parsed);
-    }),
+    execute: wrapExecute("run_command", RunCommandSchema, runCommand as any),
   },
   {
     name: "web_search",
-    description: "Search the web using DuckDuckGo. Returns top 5 results with titles, URLs, and snippets. Use this to find documentation, StackOverflow answers, or package information.",
+    description:
+      "Search the web using DuckDuckGo (html + lite fallback, 10s timeout, 1s rate limit). Returns top 5 results with titles, URLs, snippets. Use for docs, StackOverflow, package info.",
     schema: WebSearchSchema,
-    execute: wrapExecute("web_search", async (input) => {
-      const parsed = WebSearchSchema.parse(input);
-      return webSearch(parsed);
-    }),
+    execute: wrapExecute("web_search", WebSearchSchema, webSearch as any),
   },
   {
     name: "web_fetch",
-    description: "Fetch a specific URL and extract its content as Markdown. Use this after web_search to read official docs, articles, or tutorials. Blocks binary downloads.",
+    description:
+      "Fetch a URL and extract content as Markdown. Blocks private IPs, file://, binary, oversize (>2MB). 15s timeout. Strips nav/ads. Truncates to 15k chars.",
     schema: WebFetchSchema,
-    execute: wrapExecute("web_fetch", async (input) => {
-      const parsed = WebFetchSchema.parse(input);
-      return webFetch(parsed);
-    }),
+    execute: wrapExecute("web_fetch", WebFetchSchema, webFetch as any),
   },
   {
     name: "search_files",
-    description: "Search file contents across the codebase (like grep). Returns matching lines. Use 'isRegex: true' for complex patterns. Automatically ignores node_modules.",
+    description:
+      "Search file contents across codebase (like grep). Respects .gitignore, skips binary and >1MB files, avoids symlink loops. Returns max 50 matches (configurable). Supports filePattern filtering (extension or substring).",
     schema: SearchFilesSchema,
-    execute: wrapExecute("search_files", async (input) => {
-      const parsed = SearchFilesSchema.parse(input);
-      return searchFiles(parsed);
-    }),
+    execute: wrapExecute("search_files", SearchFilesSchema, searchFiles as any),
   },
   {
     name: "glob_files",
-    description: "Find files by path pattern (e.g., '**/*.ts', 'src/**/*.test.js'). Returns a list of file paths. Use this to discover where files are located.",
+    description:
+      "Find files by glob pattern (e.g., '**/*.ts'). Respects .gitignore, ignores node_modules/.git, does not follow symlinks. Returns up to 100 sorted results.",
     schema: GlobFilesSchema,
-    execute: wrapExecute("glob_files", async (input) => {
-      const parsed = GlobFilesSchema.parse(input);
-      return globFiles(parsed);
-    }),
+    execute: wrapExecute("glob_files", GlobFilesSchema, globFiles as any),
   },
   {
     name: "delete_file",
-    description: "Safely delete a file or directory. Requires 'recursive: true' for directories. Blocks protected paths like node_modules and .git.",
+    description:
+      "Safely delete a file or directory. Requires recursive:true for dirs. Blocks protected paths and outside root. Symlink-safe (doesn't follow symlink dirs). Reports deleted paths, supports dryRun.",
     schema: DeleteFileSchema,
-    execute: wrapExecute("delete_file", async (input) => {
-      const parsed = DeleteFileSchema.parse(input);
-      return deleteFile(parsed);
-    }),
+    execute: wrapExecute("delete_file", DeleteFileSchema, deleteFile as any),
   },
   {
     name: "todo_write",
-    description: "Manage a persistent task list to track your progress on complex, multi-step refactors. Use 'list' to see current tasks, 'add' to create, 'update' to change status, and 'delete' to remove.",
+    description:
+      "Manage persistent task list to track multi-step refactors. Actions: list/add/update/delete. Uses atomic write and UUIDs, per-cwd path.",
     schema: TodoWriteSchema,
-    execute: wrapExecute("todo_write", async (input) => {
-      const parsed = TodoWriteSchema.parse(input);
-      return todoWrite(parsed);
-    }),
+    execute: wrapExecute("todo_write", TodoWriteSchema, todoWrite as any),
   },
   {
     name: "ask_question",
-    description: "Pause your execution and ask the user for clarification. Use this when requirements are ambiguous. The agent loop will stop and wait for the user's reply.",
+    description:
+      "Pause execution and ask user for clarification. Max question 1000 chars, max 8 options of 100 chars each. Loop pauses, waits for user's reply.",
     schema: AskQuestionSchema,
-    execute: wrapExecute("ask_question", async (input) => {
-      const parsed = AskQuestionSchema.parse(input);
-      return askQuestion(parsed);
-    }),
+    execute: wrapExecute("ask_question", AskQuestionSchema, askQuestion as any),
   },
   {
     name: "send_message",
-    description: "Send a formatted progress update or notification to the user mid-execution. Set 'ends_turn: true' if this message concludes your work.",
+    description:
+      "Send formatted progress update mid-execution. Max 5000 chars, title max 200 chars. Set ends_turn:true if task concludes.",
     schema: SendMessageSchema,
-    execute: wrapExecute("send_message", async (input) => {
-      const parsed = SendMessageSchema.parse(input);
-      return sendMessage(parsed);
-    }),
+    execute: wrapExecute("send_message", SendMessageSchema, sendMessage as any),
   },
   {
     name: "apply_patch",
     description:
-      "Apply a unified diff patch to one or more files simultaneously. " +
-      "Use this for large refactors touching multiple files where edit_file " +
-      "would be too brittle. Supports fuzzy context matching up to 15 lines " +
-      "of drift. Use dryRun: true to validate before applying.",
+      "Apply unified diff patch to one or more files. Max 10 files, 100 hunks, 2MB patch. Supports fuzzy drift up to 15 lines with accurate offset fix. Validates all before writing, atomic writes, dryRun. Use after reading files.",
     schema: ApplyPatchSchema,
-    execute: wrapExecute("apply_patch", async (input) => {
-      const parsed = ApplyPatchSchema.parse(input);
-      return applyPatch(parsed);
-    }),
+    execute: wrapExecute("apply_patch", ApplyPatchSchema, applyPatch as any),
   },
 ];
 
-// ━━━ Lookup ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── Lookup ──────────────────────────────────────────────────────────────────
 
 export function getTool(name: string): ToolDefinition | undefined {
   return TOOLS.find((t) => t.name === name);
 }
 
-// ━━━ AI SDK Tool Format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── AI SDK Tool Format ──────────────────────────────────────────────────────
 
 export function buildAISDKTools(): Record<
   string,

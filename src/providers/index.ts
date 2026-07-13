@@ -1,92 +1,103 @@
-// src/providers/index.ts
+// src/providers/index.ts — unified registry, no split-brain
+import { streamText } from "ai";
 import type { Config, ProviderName } from "../core/config";
 import type { Message } from "../core/conversation";
-import type { StreamResult } from "./openrouter";
 import type { AgentEvent } from "../errors/base";
+import { translateProviderError } from "../errors/apiErrors";
+import {
+  providerRegistry,
+  TOKEN_LIMITS as REGISTRY_TOKEN_LIMITS,
+  getProviderDefinition,
+  getModelsForProvider as getModelsFromRegistry,
+  getDefaultModelForProvider,
+  isKnownModel as isKnownFromRegistry,
+} from "./registry";
 
-import { chatWithOpenRouter } from "./openrouter";
-import { chatWithGroq, GROQ_MODELS, GROQ_DEFAULT_MODEL } from "./groq";
-import { chatWithNvidia, NVIDIA_MODELS, NVIDIA_DEFAULT_MODEL } from "./nvidia";
-import { chatWithOpenCodeZen, OPENCODEZEN_MODELS, OPENCODEZEN_DEFAULT_MODEL } from "./opencodezen";
+// Re-export registry models as single source
+export {
+  GROQ_MODELS,
+  NVIDIA_MODELS,
+  OPENCODEZEN_MODELS,
+  OPENROUTER_MODELS,
+  GROQ_DEFAULT_MODEL,
+  NVIDIA_DEFAULT_MODEL,
+  OPENCODEZEN_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL,
+  TOKEN_LIMITS,
+  providerRegistry,
+  getProviderDefinition,
+} from "./registry";
 
-// ─── Model Registry ───────────────────────────────────────────
+export interface StreamResult {
+  stream: AsyncIterable<string>;
+}
 
 export const PROVIDER_MODELS: Record<ProviderName, readonly string[]> = {
-  openrouter: [
-    "poolside/laguna-m.1:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "openai/gpt-oss-120b:free",
-    "z-ai/glm-4.5-air:free",
-    "poolside/laguna-xs.2:free",
-    "openai/gpt-oss-20b:free",
-    "nvidia/nemotron-3-nano-30b-a3b:free",
-    "google/gemma-4-31b-it:free",
-    "moonshotai/kimi-k2.6:free",
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "nvidia/nemotron-nano-9b-v2:free",
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "nvidia/llama-nemotron-embed-vl-1b-v2:free",
-    "liquid/lfm-2.5-1.2b-thinking:free",
-    "liquid/lfm-2.5-1.2b-instruct:free",
-    "nvidia/nemotron-3.5-content-safety:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "sourceful/riverflow-v2.5-pro:free",
-    "sourceful/riverflow-v2.5-fast:free",
-    "venice/uncensored:free",
-    "nousresearch/hermes-3-405b-instruct:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "qwen/qwen3-coder-480b-a35b:free",
-  ],
-  groq: GROQ_MODELS,
-  nvidia: NVIDIA_MODELS,
-  opencodezen: OPENCODEZEN_MODELS,
+  openrouter: providerRegistry.openrouter.models,
+  groq: providerRegistry.groq.models,
+  nvidia: providerRegistry.nvidia.models,
+  opencodezen: providerRegistry.opencodezen.models,
 };
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderName, string> = {
-  openrouter: "poolside/laguna-m.1:free",
-  groq: GROQ_DEFAULT_MODEL,
-  nvidia: NVIDIA_DEFAULT_MODEL,
-  opencodezen: OPENCODEZEN_DEFAULT_MODEL,
+  openrouter: providerRegistry.openrouter.defaultModel,
+  groq: providerRegistry.groq.defaultModel,
+  nvidia: providerRegistry.nvidia.defaultModel,
+  opencodezen: providerRegistry.opencodezen.defaultModel,
 };
 
-// ─── Provider Factory ─────────────────────────────────────────
-// Return type is now StreamResult | AgentEvent — callers must
-// check whether the result is an event before consuming the stream.
+export const PROVIDER_TOKEN_LIMITS: Record<ProviderName, number> = {
+  openrouter: REGISTRY_TOKEN_LIMITS.openrouter,
+  groq: REGISTRY_TOKEN_LIMITS.groq,
+  nvidia: REGISTRY_TOKEN_LIMITS.nvidia,
+  opencodezen: REGISTRY_TOKEN_LIMITS.opencodezen,
+};
+
+// ─── Provider Factory (legacy API, now uses registry internally) ────────────
+// This keeps tests passing while using single model creation path.
 
 export function getProvider(
   providerName: ProviderName,
   config: Config
 ): (messages: Message[], model: string, attempt?: number) => Promise<StreamResult | AgentEvent> {
-  switch (providerName) {
-    case "openrouter":
-      return (messages, model, attempt = 1) =>
-        chatWithOpenRouter(messages, model, config, attempt);
+  const def = getProviderDefinition(providerName);
+  const apiKey = def.getApiKey(config);
 
-    case "groq":
-      return (messages, model, attempt = 1) =>
-        chatWithGroq(messages, model, config, attempt);
-
-    case "nvidia":
-      return (messages, model, attempt = 1) =>
-        chatWithNvidia(messages, model, config, attempt);
-
-    case "opencodezen":
-      return (messages, model, attempt = 1) =>
-        chatWithOpenCodeZen(messages, model, config, attempt);
-
-    default: {
-      const _exhaustive: never = providerName;
-      throw new Error(`Unknown provider: ${_exhaustive}`);
+  return async (messages, model, attempt = 1): Promise<StreamResult | AgentEvent> => {
+    if (!apiKey) {
+      return {
+        kind: "auth_error",
+        message: `${providerName.toUpperCase()}_API_KEY is not set. Add it to your .env file.`,
+        statusCode: 401,
+        retryable: false,
+        requiresUserAction: true,
+        provider: providerName,
+        timestamp: Date.now(),
+      };
     }
-  }
+
+    try {
+      const providerModel = def.createModel(apiKey, model);
+      const formatted = messages.map((msg) => ({
+        role: msg.role as "system" | "user" | "assistant",
+        content: msg.content,
+      }));
+
+      const result = streamText({
+        model: providerModel,
+        messages: formatted as any,
+        temperature: config.temperature,
+        maxTokens: config.maxTokens,
+      });
+
+      return { stream: result.textStream };
+    } catch (error) {
+      return translateProviderError(providerName, error, attempt);
+    }
+  };
 }
 
-// ─── Type Guard ───────────────────────────────────────────────
-// Use this wherever getProvider result is consumed to distinguish
-// a successful StreamResult from a typed AgentEvent failure.
+// ─── Type Guard ───────────────────────────────────────────────────────────────
 
 export function isStreamResult(
   result: StreamResult | AgentEvent
@@ -94,18 +105,18 @@ export function isStreamResult(
   return "stream" in result;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────
+// ─── Helpers (now delegate to registry) ─────────────────────────────────────
 
 export function getDefaultModel(providerName: ProviderName): string {
-  return PROVIDER_DEFAULT_MODELS[providerName];
+  return getDefaultModelForProvider(providerName);
 }
 
 export function getModelsForProvider(providerName: ProviderName): readonly string[] {
-  return PROVIDER_MODELS[providerName];
+  return getModelsFromRegistry(providerName);
 }
 
 export function isKnownModel(providerName: ProviderName, model: string): boolean {
-  return PROVIDER_MODELS[providerName].includes(model);
+  return isKnownFromRegistry(providerName, model);
 }
 
-export type { StreamResult };
+export type { AgentEvent };

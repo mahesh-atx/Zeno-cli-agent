@@ -1,11 +1,8 @@
-// src/tools/listFiles.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { listFiles } from "../../src/tools/listFiles";
-
-// ━━━ Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 let tmpDir: string;
 
@@ -16,8 +13,6 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
-
-// ━━━ listFiles ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("listFiles tool", () => {
   it("lists files and directories with correct formatting", async () => {
@@ -30,11 +25,9 @@ describe("listFiles tool", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      // Directories should come first, then files
       expect(result.entries.length).toBeGreaterThanOrEqual(2);
-      expect(result.entries.some(e => e.includes("[DIR]  b-dir/"))).toBe(true);
-      expect(result.entries.some(e => e.includes("[FILE] a.txt"))).toBe(true);
-      // Nested files should not be listed (non-recursive by design now)
+      expect(result.entries.some(e => e.includes("b-dir"))).toBe(true);
+      expect(result.entries.some(e => e.includes("a.txt"))).toBe(true);
       expect(result.entries.some(e => e.includes("nested.txt"))).toBe(false);
     }
   });
@@ -51,35 +44,47 @@ describe("listFiles tool", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.entries.some(e => e.includes("[FILE] a.txt"))).toBe(true);
+      expect(result.entries.some(e => e.includes("a.txt"))).toBe(true);
       expect(result.entries.some(e => e.includes("node_modules"))).toBe(false);
       expect(result.entries.some(e => e.includes(".git"))).toBe(false);
     }
   });
 
-  it("returns soft error (success: true) with hints if path is not a directory", async () => {
+  it("returns error when path is not a directory", async () => {
     const file = path.join(tmpDir, "file.txt");
     fs.writeFileSync(file, "");
     
     const rel = path.relative(process.cwd(), file);
     const result = await listFiles({ path: rel });
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.entries.length).toBe(0);
-      expect(result.hints?.[0]).toContain("is a file, not a directory");
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("not a directory");
     }
   });
 
-  it("returns soft error (success: true) with hints if directory does not exist", async () => {
+  it("returns error when directory does not exist", async () => {
     const p = path.join(tmpDir, "nonexistent");
     const rel = path.relative(process.cwd(), p);
     const result = await listFiles({ path: rel });
 
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("not found");
+    }
+  });
+
+  it("supports recursive listing", async () => {
+    fs.writeFileSync(path.join(tmpDir, "a.txt"), "hello");
+    fs.mkdirSync(path.join(tmpDir, "b-dir"));
+    fs.writeFileSync(path.join(tmpDir, "b-dir", "nested.txt"), "inner");
+
+    const rel = path.relative(process.cwd(), tmpDir);
+    const result = await listFiles({ path: rel, recursive: true });
+
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.entries.length).toBe(0);
-      expect(result.hints?.[0]).toContain("does not exist");
+      expect(result.entries.some(e => e.includes("nested.txt") || e.includes("b-dir"))).toBe(true);
     }
   });
 });

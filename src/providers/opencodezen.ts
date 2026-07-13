@@ -1,24 +1,14 @@
-// src/providers/opencodezen.ts
-import { createOpenAI } from "@ai-sdk/openai";
+// src/providers/opencodezen.ts — delegates to registry
 import { streamText } from "ai";
 import type { Message } from "../core/conversation";
 import type { Config } from "../core/config";
+import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-import type { StreamResult } from "./openrouter";
+import { providerRegistry, OPENCODEZEN_MODELS as REGISTRY_MODELS, OPENCODEZEN_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
-// ━━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const OPENCODEZEN_MODELS = [
-  "minimax-m3-free",
-  "mimo-v2.5-free",
-  "nemotron-3-ultra-free",
-  "north-mini-code-free",
-] as const;
-
-export const OPENCODEZEN_DEFAULT_MODEL = "mimo-v2.5-free";
-
-// ━━━ OpenCode Zen Client ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export const OPENCODEZEN_MODELS = REGISTRY_MODELS;
+export const OPENCODEZEN_DEFAULT_MODEL = REGISTRY_DEFAULT;
 
 export async function chatWithOpenCodeZen(
   messages: Message[],
@@ -26,7 +16,9 @@ export async function chatWithOpenCodeZen(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  if (!config.opencodezenApiKey) {
+  const def = providerRegistry.opencodezen;
+  const apiKey = def.getApiKey(config);
+  if (!apiKey) {
     return {
       kind: "auth_error",
       message: "OPENCODEZEN_API_KEY is not set. Add it to your .env file.",
@@ -38,24 +30,19 @@ export async function chatWithOpenCodeZen(
     };
   }
 
-  const opencodezen = createOpenAI({
-    apiKey: config.opencodezenApiKey,
-    baseURL: "https://opencode.ai/zen/v1",
-  });
-
-  const formattedMessages = messages.map((msg) => ({
+  const formatted = messages.map((msg) => ({
     role: msg.role as "system" | "user" | "assistant",
     content: msg.content,
   }));
 
   try {
+    const modelInstance = def.createModel(apiKey, model);
     const result = streamText({
-      model: opencodezen(model),
-      messages: formattedMessages,
+      model: modelInstance,
+      messages: formatted as any,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
     });
-
     return { stream: result.textStream };
   } catch (error) {
     return translateProviderError("opencodezen", error, attempt);

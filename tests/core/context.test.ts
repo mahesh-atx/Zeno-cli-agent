@@ -364,7 +364,7 @@ describe("ContextManager.truncateHistory", () => {
     const cm = new ContextManager("groq");
     const limit = cm.getTokenLimit();
     // Build messages large enough to trigger truncation
-    const longContent = "x".repeat(limit * 5);
+    const longContent = ("hello world this is a longer test content to ensure token count exceeds limit " as string).repeat(Math.ceil(limit / 2));
     const msgs: Message[] = [
       { role: "system", content: "SYSTEM PROMPT" },
       { role: "user", content: longContent },
@@ -384,7 +384,7 @@ describe("ContextManager.truncateHistory", () => {
   it("removes oldest messages first", () => {
     const cm = new ContextManager("groq");
     const limit = cm.getTokenLimit();
-    const longContent = "x".repeat(limit * 5);
+    const longContent = ("hello world this is a longer test content to ensure token count exceeds limit " as string).repeat(Math.ceil(limit / 2));
     const msgs: Message[] = [
       { role: "system", content: "SYSTEM" },
       { role: "user", content: "OLDEST USER " + longContent },
@@ -404,7 +404,7 @@ describe("ContextManager.truncateHistory", () => {
   it("tokensSaved is greater than 0 when truncation occurs", () => {
     const cm = new ContextManager("groq");
     const limit = cm.getTokenLimit();
-    const longContent = "x".repeat(limit * 5);
+    const longContent = ("hello world this is a longer test content to ensure token count exceeds limit " as string).repeat(Math.ceil(limit / 2));
     const msgs: Message[] = [
       { role: "system", content: "SYSTEM" },
       { role: "user", content: longContent },
@@ -425,7 +425,7 @@ describe("ContextManager.truncateHistory", () => {
   it("removedCount is always even (pairs)", () => {
     const cm = new ContextManager("groq");
     const limit = cm.getTokenLimit();
-    const longContent = "x".repeat(limit * 5);
+    const longContent = ("hello world this is a longer test content to ensure token count exceeds limit " as string).repeat(Math.ceil(limit / 2));
     const msgs: Message[] = [
       { role: "system", content: "SYSTEM" },
       { role: "user", content: longContent },

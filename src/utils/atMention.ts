@@ -29,7 +29,6 @@ function stripTrailingPunctuation(p: string): string {
 }
 
 function isLikelyBinary(buf: Buffer): boolean {
-  // Sample first 1KB — null bytes strongly indicate binary
   const slice = buf.subarray(0, Math.min(1024, buf.length));
   for (let i = 0; i < slice.length; i++) {
     if (slice[i] === 0) return true;
@@ -38,6 +37,7 @@ function isLikelyBinary(buf: Buffer): boolean {
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
+// Now uses shared guards for safe path, size, binary checks
 
 export function parseAtMentions(input: string): AtMentionResult {
   const matches = [...input.matchAll(AT_MENTION_REGEX)];
@@ -50,12 +50,29 @@ export function parseAtMentions(input: string): AtMentionResult {
   const errors: string[] = [];
   const processedPaths = new Set<string>();
 
+  // Dynamic import to avoid circular issues if any
+  let guards: typeof import("../tools/guards") | null = null;
+  try {
+    guards = require("../tools/guards") as typeof import("../tools/guards");
+  } catch {
+    guards = null;
+  }
+
   for (const match of matches) {
     const rawPath = stripTrailingPunctuation(match[1]);
 
     if (!rawPath) continue;
     if (processedPaths.has(rawPath)) continue;
     processedPaths.add(rawPath);
+
+    // Safe path check via guards if available
+    if (guards) {
+      const safe = guards.assertSafePath(rawPath);
+      if (safe.error) {
+        errors.push(`@${rawPath}: ${safe.error}`);
+        continue;
+      }
+    }
 
     const resolved = path.resolve(process.cwd(), rawPath);
 
@@ -77,6 +94,14 @@ export function parseAtMentions(input: string): AtMentionResult {
       continue;
     }
 
+    if (guards) {
+      const sizeCheck = guards.checkFileSize(stat.size, guards.LIMITS.MAX_READ_BYTES);
+      if (!sizeCheck.ok) {
+        errors.push(`@${rawPath}: ${sizeCheck.error}`);
+        continue;
+      }
+    }
+
     let buf: Buffer;
     try {
       buf = fs.readFileSync(resolved);
@@ -86,7 +111,7 @@ export function parseAtMentions(input: string): AtMentionResult {
       continue;
     }
 
-    if (isLikelyBinary(buf)) {
+    if (isLikelyBinary(buf) || (guards && guards.isBinaryBuffer(buf))) {
       errors.push(`@${rawPath}: appears to be a binary file (skipped)`);
       continue;
     }
@@ -106,11 +131,9 @@ export function parseAtMentions(input: string): AtMentionResult {
     attachments.push({ filePath: rawPath, content, lines, tokens });
   }
 
-  // Replace successfully-attached @mentions with a clean reference
   const cleanedInput = input.replace(AT_MENTION_REGEX, (match, p1: string) => {
     const cleaned = stripTrailingPunctuation(p1);
     if (attachments.some((a) => a.filePath === cleaned)) {
-      // Preserve any trailing punctuation that was stripped
       const trailing = p1.slice(cleaned.length);
       return `[file: ${cleaned}]${trailing}`;
     }

@@ -1,19 +1,63 @@
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Token counting — now uses gpt-tokenizer for accuracy with fallback
 
-// Re-export from conversation to avoid duplicate definitions
-// tokens.ts uses this for its count functions
 import type { Message } from "../core/conversation";
 
-// ─── Token Counting ───────────────────────────────────────────────────────────
+// Lazy-loaded tokenizer to avoid import cost at startup if not needed
+let encodeFunction: ((text: string) => number[]) | null = null;
+let tokenizerAvailable = false;
+
+function getTokenizer(): ((text: string) => number[]) | null {
+  if (encodeFunction !== null || tokenizerAvailable) {
+    return encodeFunction;
+  }
+  try {
+    // gpt-tokenizer is pure JS, no wasm, safe to require
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const gptTokenizer = require("gpt-tokenizer") as { encode: (s: string) => number[] };
+    if (gptTokenizer && typeof gptTokenizer.encode === "function") {
+      encodeFunction = gptTokenizer.encode;
+      tokenizerAvailable = true;
+      return encodeFunction;
+    }
+  } catch {
+    // Fallback to heuristic
+  }
+  // Mark as attempted to avoid repeated try
+  tokenizerAvailable = true;
+  encodeFunction = null;
+  return null;
+}
 
 /**
  * Estimates token count for a string.
- * Uses a simple approximation: 1 token ≈ 4 characters.
- * Good enough for context tracking without a full tokenizer library.
+ * Uses gpt-tokenizer (cl100k_base) if available for accurate count,
+ * otherwise falls back to heuristic with code-aware divisor.
  */
 export function countTokens(text: string): number {
   if (!text || text.length === 0) return 0;
-  return Math.ceil(text.length / 4);
+
+  const encoder = getTokenizer();
+  if (encoder) {
+    try {
+      return encoder(text).length;
+    } catch {
+      // fallback on error
+    }
+  }
+
+  // Fallback heuristic: code-aware
+  // Code typically has higher token density (~3.5 chars/token) vs prose (~4)
+  const isCodeLike =
+    /[{}();=<>]/.test(text) &&
+    (text.includes("function") ||
+      text.includes("const ") ||
+      text.includes("import ") ||
+      text.includes("export ") ||
+      text.includes("=>") ||
+      /[\{\}]{2,}/.test(text));
+
+  const divisor = isCodeLike ? 3.5 : 4;
+  return Math.ceil(text.length / divisor);
 }
 
 export function countMessageTokens(message: Message): number {
@@ -35,17 +79,10 @@ export function countMessageTokens(message: Message): number {
   return countTokens(text) + 4;
 }
 
-/**
- * Counts total tokens across all messages in a conversation.
- */
 export function countHistoryTokens(messages: Message[]): number {
   return messages.reduce((total, msg) => total + countMessageTokens(msg), 0);
 }
 
-/**
- * Formats token count for display.
- * e.g. 1842 → "1,842"
- */
 export function formatTokenCount(count: number): string {
   return count.toLocaleString("en-US");
 }
