@@ -173,7 +173,6 @@ export function App() {
   const [rateLimitMs, setRateLimitMs] = useState<number | null>(null);
   const [networkDropped, setNetworkDropped] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
-  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const retryPressedRef = useRef(false);
   const retrySignal = {
@@ -214,25 +213,6 @@ export function App() {
     },
     [pushCompleted]
   );
-
-  const toggleExpand = useCallback((id: string) => {
-    setExpandedTools(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    // Also update live preview if it's the same tool
-    setLivePreview(prev => {
-      if (prev.activeTool && prev.activeTool.id === id) {
-        return {
-          ...prev,
-          activeTool: { ...prev.activeTool, isExpanded: !prev.activeTool.isExpanded },
-        };
-      }
-      return prev;
-    });
-  }, []);
 
   const handleThemeConfirm = useCallback(
     (themeName: string) => {
@@ -603,7 +583,6 @@ export function App() {
               stderr,
               hunks,
               rawResult: result,
-              isExpanded: expandedTools.has(targetId),
             };
 
             pushCompleted({
@@ -810,7 +789,7 @@ export function App() {
         ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
       ];
     },
-    [completedMessages, expandedTools]
+    [completedMessages]
   );
 
   const showLive =
@@ -831,7 +810,8 @@ export function App() {
               />
             );
           }
-          return <MessageItem key={item.msg.id} message={item.msg} expandedToolIds={expandedTools} onToggleExpand={toggleExpand} />;
+          const isLastMsg = item.msg.id === completedMessages[completedMessages.length - 1]?.id;
+          return <MessageItem key={item.msg.id} message={item.msg} isLast={isLastMsg} />;
         }}
       </Static>
 

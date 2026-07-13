@@ -1,5 +1,5 @@
-import React from "react";
-import { Box, Text } from "ink";
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { Colors } from "../themes/colors";
 import { StructuredDiffList } from "./diff/StructuredDiffList";
@@ -21,23 +21,7 @@ export interface ToolCall {
 
 interface ToolOutputProps {
   toolCall: ToolCall;
-  onToggleExpand?: (id: string) => void;
-}
-
-function formatInput(input: Record<string, unknown>): string {
-  if (Object.keys(input).length === 0) return "";
-  const primaryKeys = ["path", "file", "url", "query", "CommandLine", "pattern", "message", "question"];
-  let primaryValue;
-  for (const key of primaryKeys) {
-    if (input[key] !== undefined) {
-      primaryValue = input[key];
-      break;
-    }
-  }
-  if (primaryValue === undefined) primaryValue = Object.values(input)[0];
-  const str = typeof primaryValue === "string" ? primaryValue : JSON.stringify(primaryValue);
-  const truncated = str.length > 50 ? str.slice(0, 50) + "..." : str;
-  return `(${truncated})`;
+  isLast?: boolean;
 }
 
 function StatusIcon({ status }: { status: ToolStatus }) {
@@ -53,16 +37,34 @@ function StatusIcon({ status }: { status: ToolStatus }) {
   }
 }
 
+function useExpandable(isLast: boolean | undefined, initial = false) {
+  const [isExpanded, setIsExpanded] = useState(initial);
+  
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+        setIsExpanded(prev => !prev);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
+  return [isExpanded, setIsExpanded] as const;
+}
+
 // ─── Read Many Files ──────────────────────────────────────────────────────────
-function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
+function ReadManyFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useExpandable(isLast, toolCall.isExpanded || false);
   const input = toolCall.input as { paths?: string[] };
   const raw = toolCall.rawResult as any;
   const paths = input.paths || [];
   const results = raw?.results as Array<{ path: string; success: boolean; lines?: number; tokens?: number; error?: string }> | undefined;
   const totalFiles = paths.length;
   const successCount = results ? results.filter(r => r.success).length : 0;
-  const isExpanded = toolCall.isExpanded || false;
   const displayFiles = results || paths.map(p => ({ path: p, success: true }));
+
+  // Also allow internal toggle via ctrl+r global, but we handle via useExpandable
+  // isExpanded state is local, not dependent on parent Static re-render
 
   if (toolCall.status === "running") {
     return (
@@ -90,10 +92,10 @@ function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
     <Box flexDirection="column">
       <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text><Text dimColor> ({totalFiles} requested)</Text></Text>
       {displayFiles.map((file, idx) => {
-        const isLast = idx === displayFiles.length - 1;
+        const isLastFile = idx === displayFiles.length - 1;
         const icon = file.success ? "✓" : "✗";
         const color = file.success ? Colors.AccentGreen : Colors.AccentRed;
-        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color={color}>{icon} </Text><Text color="white">{file.path}</Text>{file.success && file.lines !== undefined && <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens}` : ""})</Text>}{!file.success && file.error && <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>}</Text>;
+        return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color={color}>{icon} </Text><Text color="white">{file.path}</Text>{file.success && file.lines !== undefined && <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens}` : ""})</Text>}{!file.success && file.error && <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>}</Text>;
       })}
       <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
@@ -101,10 +103,25 @@ function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
 }
 
 // ─── List Files ───────────────────────────────────────────────────────────────
-function ListFilesOutput({ toolCall }: { toolCall: ToolCall }) {
+function ListFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded] = useExpandable(isLast, toolCall.isExpanded || false);
+  // Actually use same hook but we need setter from useExpandable, so redo
+  return <ListFilesInner toolCall={toolCall} isLast={isLast} />;
+}
+
+function ListFilesInner({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+        if (isLast) setIsExpanded(p => !p);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
   const raw = toolCall.rawResult as any;
   const entries = (raw?.entries || []) as string[];
-  const isExpanded = toolCall.isExpanded || false;
   const pathArg = (toolCall.input as any).path || ".";
 
   if (toolCall.status === "running") {
@@ -127,8 +144,8 @@ function ListFilesOutput({ toolCall }: { toolCall: ToolCall }) {
     <Box flexDirection="column">
       <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pathArg})</Text><Text color="white"> — {entries.length} items</Text></Text>
       {entries.map((e, idx) => {
-        const isLast = idx === entries.length - 1;
-        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{e}</Text></Text>;
+        const isLastFile = idx === entries.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{e}</Text></Text>;
       })}
       <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
@@ -136,11 +153,20 @@ function ListFilesOutput({ toolCall }: { toolCall: ToolCall }) {
 }
 
 // ─── Glob Files ─────────────────────────────────────────────────────────────
-function GlobFilesOutput({ toolCall }: { toolCall: ToolCall }) {
+function GlobFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+        setIsExpanded(p => !p);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
   const raw = toolCall.rawResult as any;
   const files = (raw?.files || []) as string[];
   const total = raw?.total as number | undefined;
-  const isExpanded = toolCall.isExpanded || false;
   const pattern = (toolCall.input as any).pattern || "**";
 
   if (toolCall.status === "running") {
@@ -162,20 +188,29 @@ function GlobFilesOutput({ toolCall }: { toolCall: ToolCall }) {
     <Box flexDirection="column">
       <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pattern})</Text><Text color="white"> — {total ?? files.length} matches{(raw?.truncated ? " (truncated)" : "")}</Text></Text>
       {isExpanded ? files.map((f, idx) => {
-        const isLast = idx === files.length - 1;
-        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{f}</Text></Text>;
+        const isLastFile = idx === files.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{f}</Text></Text>;
       }) : files.length > 0 && files.length <= 5 && <Text><Text dimColor>   └  </Text><Text color="white">{files.map(f => f.split("/").pop()).join(", ")}</Text></Text>}
       {isExpanded && <Text dimColor>      (ctrl+r to collapse)</Text>}
     </Box>
   );
 }
 
-// ─── Search Files (grep) ───────────────────────────────────────────────────
-function SearchFilesOutput({ toolCall }: { toolCall: ToolCall }) {
+// ─── Search Files ───────────────────────────────────────────────────────────
+function SearchFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+        setIsExpanded(p => !p);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
   const raw = toolCall.rawResult as any;
   const matches = (raw?.matches || []) as Array<{ file: string; line: number; content: string }>;
   const total = raw?.total as number | undefined;
-  const isExpanded = toolCall.isExpanded || false;
   const query = (toolCall.input as any).query || "";
 
   if (toolCall.status === "running") {
@@ -197,8 +232,8 @@ function SearchFilesOutput({ toolCall }: { toolCall: ToolCall }) {
     <Box flexDirection="column">
       <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Text>
       {(isExpanded ? matches : matches.slice(0, 5)).map((m, idx, arr) => {
-        const isLast = idx === arr.length - 1;
-        return <Text key={idx}><Text dimColor>   {isLast ? "└  " : "├  "}</Text><Text color="white">{m.file}:{m.line}</Text><Text dimColor> — {m.content.slice(0, 50)}</Text></Text>;
+        const isLastFile = idx === arr.length - 1;
+        return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{m.file}:{m.line}</Text><Text dimColor> — {m.content.slice(0, 50)}</Text></Text>;
       })}
       {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : matches.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
     </Box>
@@ -206,9 +241,18 @@ function SearchFilesOutput({ toolCall }: { toolCall: ToolCall }) {
 }
 
 // ─── Read File ──────────────────────────────────────────────────────────────
-function ReadFileOutput({ toolCall }: { toolCall: ToolCall }) {
+function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+        setIsExpanded(p => !p);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
   const raw = toolCall.rawResult as any;
-  const isExpanded = toolCall.isExpanded || false;
   const pathArg = (toolCall.input as any).path || "file";
   const content = raw?.content as string | undefined;
   const lines = raw?.lines as number | undefined;
@@ -241,12 +285,14 @@ function ReadFileOutput({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-// ─── Git outputs ────────────────────────────────────────────────────────────
-function GitStatusOutput({ toolCall }: { toolCall: ToolCall }) {
+// ─── Git Status ─────────────────────────────────────────────────────────────
+function GitStatusOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+
   const raw = toolCall.rawResult as any;
   const isClean = raw?.isClean;
   const branch = raw?.branch;
-  const isExpanded = toolCall.isExpanded || false;
   const output = raw?.output as string | undefined;
 
   if (toolCall.status === "running") {
@@ -263,19 +309,16 @@ function GitStatusOutput({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-function GitDiffOutput({ toolCall }: { toolCall: ToolCall }) {
+function GitDiffOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+
   const raw = toolCall.rawResult as any;
   const diff = raw?.diff as string | undefined;
-  const isExpanded = toolCall.isExpanded || false;
   const isEmpty = raw?.isEmpty;
 
-  if (toolCall.status === "running") {
-    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git diff</Text></Text></Box>;
-  }
-
-  if (isEmpty) {
-    return <Box flexDirection="column"><Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text><Text color="white"> — no changes</Text></Text></Box>;
-  }
+  if (toolCall.status === "running") return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git diff</Text></Text></Box>;
+  if (isEmpty) return <Box flexDirection="column"><Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text><Text color="white"> — no changes</Text></Text></Box>;
 
   if (!isExpanded) {
     const preview = diff ? diff.split("\n").slice(0, 2).join(" ").slice(0, 80) : "diff";
@@ -299,17 +342,16 @@ function GitDiffOutput({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-function GitLogOutput({ toolCall }: { toolCall: ToolCall }) {
+function GitLogOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
+  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+
   const raw = toolCall.rawResult as any;
   const log = raw?.log as string | undefined;
   const count = raw?.count as number | undefined;
-  const isExpanded = toolCall.isExpanded || false;
-
-  if (toolCall.status === "running") {
-    return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git log</Text></Text></Box>;
-  }
-
   const lines = log ? log.split("\n") : [];
+
+  if (toolCall.status === "running") return <Box flexDirection="column"><Text><StatusIcon status="running" /><Text color="white" bold> Git log</Text></Text></Box>;
 
   if (!isExpanded && lines.length > 4) {
     return (
@@ -335,17 +377,17 @@ function GitLogOutput({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-export function ToolOutput({ toolCall }: ToolOutputProps) {
+export function ToolOutput({ toolCall, isLast }: ToolOutputProps) {
   const { toolName, input, status, resultSummary, stdout, stderr } = toolCall;
 
-  if (toolName === "read_many_files") return <ReadManyFilesOutput toolCall={toolCall} />;
-  if (toolName === "read_file") return <ReadFileOutput toolCall={toolCall} />;
-  if (toolName === "list_files") return <ListFilesOutput toolCall={toolCall} />;
-  if (toolName === "glob_files") return <GlobFilesOutput toolCall={toolCall} />;
-  if (toolName === "search_files") return <SearchFilesOutput toolCall={toolCall} />;
-  if (toolName === "git_status") return <GitStatusOutput toolCall={toolCall} />;
-  if (toolName === "git_diff") return <GitDiffOutput toolCall={toolCall} />;
-  if (toolName === "git_log") return <GitLogOutput toolCall={toolCall} />;
+  if (toolName === "read_many_files") return <ReadManyFilesOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "read_file") return <ReadFileOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "list_files") return <ListFilesOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "glob_files") return <GlobFilesOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "search_files") return <SearchFilesOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "git_status") return <GitStatusOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "git_diff") return <GitDiffOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "git_log") return <GitLogOutput toolCall={toolCall} isLast={isLast} />;
 
   const inputSummary = formatInput(input);
   const formattedName = toolName.charAt(0).toUpperCase() + toolName.slice(1);

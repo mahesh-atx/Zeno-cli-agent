@@ -19,8 +19,7 @@ export interface ChatMessage {
 
 interface MessageItemProps {
   message: ChatMessage;
-  expandedToolIds?: Set<string>;
-  onToggleExpand?: (id: string) => void;
+  isLast?: boolean;
 }
 
 function UserMessage({ content }: { content: string }) {
@@ -39,15 +38,13 @@ function AssistantMessage({
   isStreaming,
   toolCalls,
   hideIcon,
-  expandedToolIds,
-  onToggleExpand,
+  isLast,
 }: {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
   hideIcon?: boolean;
-  expandedToolIds?: Set<string>;
-  onToggleExpand?: (id: string) => void;
+  isLast?: boolean;
 }) {
   const rendered = isStreaming
     ? renderStreaming(content)
@@ -59,12 +56,9 @@ function AssistantMessage({
     <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
       {toolCalls && toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
-          {toolCalls.map((tc) => {
-            const isExpanded = expandedToolIds?.has(tc.id) || tc.isExpanded || false;
-            return (
-              <ToolOutput key={tc.id} toolCall={{ ...tc, isExpanded }} onToggleExpand={onToggleExpand} />
-            );
-          })}
+          {toolCalls.map((tc) => (
+            <ToolOutput key={tc.id} toolCall={tc} isLast={isLast} />
+          ))}
         </Box>
       )}
 
@@ -111,7 +105,7 @@ function SystemNotice({ content }: { content: string }) {
   );
 }
 
-export function MessageItem({ message, expandedToolIds, onToggleExpand }: MessageItemProps) {
+export function MessageItem({ message, isLast }: MessageItemProps) {
   switch (message.role) {
     case "user":
       return <UserMessage content={message.content} />;
@@ -122,8 +116,7 @@ export function MessageItem({ message, expandedToolIds, onToggleExpand }: Messag
           isStreaming={message.isStreaming}
           toolCalls={message.toolCalls}
           hideIcon={message.hideIcon}
-          expandedToolIds={expandedToolIds}
-          onToggleExpand={onToggleExpand}
+          isLast={isLast}
         />
       );
     case "error":
