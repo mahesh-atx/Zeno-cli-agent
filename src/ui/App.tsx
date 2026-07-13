@@ -736,14 +736,19 @@ export function App() {
     pushNotice("Question cancelled. Type a message to continue.");
   }, [pushNotice]);
 
-  // Unified input handler: Ctrl+C always, Ctrl+R expand, R retry
+  // Unified input handler: Ctrl+C exit, Ctrl+R/E expand, R retry
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "c") {
+      if (key.ctrl && input.toLowerCase() === "c") {
         process.exit(0);
+        return;
       }
-      if (key.ctrl && input.toLowerCase() === "r") {
-        // Expand/collapse last expandable tool (read_many_files, list_files, glob_files, search_files, git_*, etc.)
+      // Ctrl+R or Ctrl+E to expand/collapse last expandable tool
+      // Plain 'e' also works when loading (InputBar disabled) to allow expansion during streaming
+      const isExpandKey = (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) || 
+                          (!key.ctrl && !key.meta && input.toLowerCase() === "e" && isLoading && !isMenuOpen);
+
+      if (isExpandKey) {
         const expandableTools = new Set([
           "read_many_files",
           "list_files",
@@ -753,8 +758,9 @@ export function App() {
           "git_diff",
           "git_log",
           "read_file",
+          "run_command",
         ]);
-        // Check completed messages from last to first
+        let found = false;
         for (let i = completedMessages.length - 1; i >= 0; i--) {
           const msg = completedMessages[i];
           if (msg.toolCalls) {
@@ -762,19 +768,28 @@ export function App() {
               const tc = msg.toolCalls[j];
               if (expandableTools.has(tc.toolName)) {
                 toggleExpand(tc.id);
+                pushNotice(`${expandedTools.has(tc.id) ? "Collapsed" : "Expanded"} ${tc.toolName} (${tc.id.slice(0,8)}) — ${!expandedTools.has(tc.id) ? "showing details" : "collapsed"}`);
+                found = true;
                 return;
               }
             }
           }
         }
-        // Also check live preview
         if (livePreview.activeTool && expandableTools.has(livePreview.activeTool.toolName)) {
           toggleExpand(livePreview.activeTool.id);
+          pushNotice(`Toggled ${livePreview.activeTool.toolName} preview`);
+          found = true;
+          return;
+        }
+        if (!found && (key.ctrl && input.toLowerCase() === "r")) {
+          // Only show notice for ctrl+r, not for plain e to avoid noise while typing
+          pushNotice("No expandable tool found. Run read_many_files, list_files, glob_files, grep, git tools, etc.");
         }
         return;
       }
+
       // R retry only when network dropped and not ctrl
-      if (!key.ctrl && (input === "r" || input === "R") && networkDropped) {
+      if (!key.ctrl && !key.meta && (input === "r" || input === "R") && networkDropped) {
         retryPressedRef.current = true;
         setNetworkDropped(false);
         setAgentStatus("retrying");
