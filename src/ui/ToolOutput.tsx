@@ -1,5 +1,5 @@
-import React from "react";
-import { Box, Text } from "ink";
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { Colors } from "../themes/colors";
 import { StructuredDiffList } from "./diff/StructuredDiffList";
@@ -15,16 +15,18 @@ export interface ToolCall {
   stdout?: string;
   stderr?: string;
   hunks?: import("diff").StructuredPatchHunk[];
+  rawResult?: unknown;
+  isExpanded?: boolean;
 }
 
 interface ToolOutputProps {
   toolCall: ToolCall;
+  onToggleExpand?: (id: string) => void;
 }
 
 function formatInput(input: Record<string, unknown>): string {
   if (Object.keys(input).length === 0) return "";
   
-  // Pick the primary parameter to display (like path, url, or query) to match Claude Code
   const primaryKeys = ["path", "file", "url", "query", "CommandLine", "pattern", "message", "question"];
   let primaryValue;
   
@@ -35,7 +37,6 @@ function formatInput(input: Record<string, unknown>): string {
     }
   }
 
-  // Fallback to the first property if no primary key matches
   if (primaryValue === undefined) {
     primaryValue = Object.values(input)[0];
   }
@@ -62,15 +63,154 @@ function StatusIcon({ status }: { status: ToolStatus }) {
   }
 }
 
-export function ToolOutput({ toolCall }: ToolOutputProps) {
+// Specialized rendering for read_many_files parallel UI
+function ReadManyFilesOutput({ toolCall }: { toolCall: ToolCall }) {
+  const input = toolCall.input as { paths?: string[] };
+  const raw = toolCall.rawResult as any;
+  const paths = input.paths || [];
+  const results = raw?.results as Array<{ path: string; success: boolean; lines?: number; tokens?: number; size?: number; error?: string }> | undefined;
+  
+  const totalFiles = paths.length;
+  const successCount = results ? results.filter(r => r.success).length : 0;
+  const isExpanded = toolCall.isExpanded || false;
+
+  const displayFiles = results || paths.map(p => ({ path: p, success: true }));
+
+  if (toolCall.status === "running") {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <StatusIcon status="running" />
+          <Text color="white" bold> Read {totalFiles} files</Text>
+        </Box>
+        <Box marginLeft={4}>
+          <Text dimColor>└  Reading {paths.slice(0, 3).join(", ")}{totalFiles > 3 ? ` +${totalFiles - 3} more` : ""}...</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Collapsed view
+  if (!isExpanded) {
+    const firstThree = displayFiles.slice(0, 3).map(f => f.path.split("/").pop() || f.path);
+    const remaining = displayFiles.length - 3;
+    const fileList = remaining > 0 
+      ? `${firstThree.join(", ")} +${remaining} more`
+      : firstThree.join(", ");
+
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <StatusIcon status={toolCall.status} />
+          <Text color="white" bold> Read {successCount || totalFiles} files</Text>
+        </Box>
+        <Box marginLeft={4} flexDirection="column">
+          <Box>
+            <Text dimColor>└  </Text>
+            <Text color="white">{fileList}</Text>
+          </Box>
+          <Box marginLeft={2}>
+            <Text dimColor>   (ctrl+r to expand)</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Expanded view
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
+        <StatusIcon status={toolCall.status} />
+        <Text color="white" bold> Read {successCount || totalFiles} files</Text>
+        <Text dimColor> ({totalFiles} requested)</Text>
+      </Box>
+      <Box marginLeft={4} flexDirection="column">
+        {displayFiles.map((file, idx) => {
+          const isLast = idx === displayFiles.length - 1;
+          const icon = file.success ? "✓" : "✗";
+          const color = file.success ? Colors.AccentGreen : Colors.AccentRed;
+          return (
+            <Box key={idx}>
+              <Text dimColor>{isLast ? "└  " : "├  "}</Text>
+              <Text color={color}>{icon} </Text>
+              <Text color="white">{file.path}</Text>
+              {file.success && file.lines !== undefined && (
+                <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens} tokens` : ""})</Text>
+              )}
+              {!file.success && file.error && (
+                <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>
+              )}
+            </Box>
+          );
+        })}
+        <Box marginTop={0} marginLeft={2}>
+          <Text dimColor>   (ctrl+r to collapse)</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function GitStatusOutput({ toolCall }: { toolCall: ToolCall }) {
+  const raw = toolCall.rawResult as any;
+  const isClean = raw?.isClean;
+  const branch = raw?.branch;
+  
+  if (toolCall.status === "running") {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <StatusIcon status="running" />
+          <Text color="white" bold> Git status</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
+        <StatusIcon status={toolCall.status} />
+        <Text color="white" bold> Git status{branch ? ` (${branch})` : ""}</Text>
+        {isClean !== undefined && (
+          <Text color={isClean ? Colors.AccentGreen : Colors.AccentYellow}> {isClean ? "clean" : "dirty"}</Text>
+        )}
+      </Box>
+      {toolCall.status === "success" && (
+        <Box marginLeft={4}>
+          <Text dimColor>└  </Text>
+          <Text color="white">{toolCall.resultSummary || raw?.output?.slice(0, 100) || "done"}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+export function ToolOutput({ toolCall, onToggleExpand }: ToolOutputProps) {
   const { toolName, input, status, resultSummary, stdout, stderr } = toolCall;
+
+  // Special cases for P2 new tools
+  if (toolName === "read_many_files") {
+    return <ReadManyFilesOutput toolCall={toolCall} />;
+  }
+
+  if (toolName === "git_status") {
+    return <GitStatusOutput toolCall={toolCall} />;
+  }
+
   const inputSummary = formatInput(input);
   
-  // Format tool name: 'read_file' -> 'Read_file'
   const formattedName = toolName.charAt(0).toUpperCase() + toolName.slice(1);
   let userFacingName = formattedName;
   if (toolName === "write_file") userFacingName = "Write";
   if (toolName === "edit_file" || toolName === "apply_patch" || toolName === "replace_file_content") userFacingName = "Update";
+  if (toolName === "read_file") userFacingName = "Read";
+  if (toolName === "read_many_files") userFacingName = "Read";
+  if (toolName === "list_files" || toolName === "glob_files") userFacingName = "Search";
+  if (toolName === "search_files") userFacingName = "Grep";
+  if (toolName === "git_diff") userFacingName = "Git diff";
+  if (toolName === "git_log") userFacingName = "Git log";
 
   let addedLines = 0;
   let removedLines = 0;
@@ -127,7 +267,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
         </Box>
       )}
 
-      {status !== "running" && (!toolCall.hunks || (!isWrite && !isUpdate)) && resultSummary && (
+      {status !== "running" && (!toolCall.hunks || (!isWrite && !isUpdate)) && resultSummary && toolName !== "read_many_files" && (
         <Box marginLeft={4}>
           <Text dimColor>└  </Text>
           <Text color="white">
@@ -142,7 +282,7 @@ export function ToolOutput({ toolCall }: ToolOutputProps) {
         </Box>
       )}
 
-      {!toolCall.hunks && stdout && stdout.trim() && (
+      {!toolCall.hunks && stdout && stdout.trim() && toolName !== "read_many_files" && (
         <Box flexDirection="column" marginLeft={7} marginTop={0}>
           {stdout
             .trim()

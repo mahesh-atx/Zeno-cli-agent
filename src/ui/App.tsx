@@ -173,6 +173,7 @@ export function App() {
   const [rateLimitMs, setRateLimitMs] = useState<number | null>(null);
   const [networkDropped, setNetworkDropped] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const retryPressedRef = useRef(false);
   const retrySignal = {
@@ -213,6 +214,15 @@ export function App() {
     },
     [pushCompleted]
   );
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedTools(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const handleThemeConfirm = useCallback(
     (themeName: string) => {
@@ -582,6 +592,8 @@ export function App() {
               stdout,
               stderr,
               hunks,
+              rawResult: result,
+              isExpanded: expandedTools.has(targetId),
             };
 
             pushCompleted({
@@ -733,6 +745,33 @@ export function App() {
     },
     { isActive: networkDropped }
   );
+
+  // Ctrl+R to expand/collapse last read_many_files
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input.toLowerCase() === "r") {
+        // Find last read_many_files tool in history
+        for (let i = completedMessages.length - 1; i >= 0; i--) {
+          const msg = completedMessages[i];
+          if (msg.toolCalls) {
+            for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
+              const tc = msg.toolCalls[j];
+              if (tc.toolName === "read_many_files") {
+                toggleExpand(tc.id);
+                return;
+              }
+            }
+          }
+        }
+        // Also check live preview active tool
+        if (livePreview.activeTool && livePreview.activeTool.toolName === "read_many_files") {
+          toggleExpand(livePreview.activeTool.id);
+        }
+      }
+    },
+    { isActive: true }
+  );
+
   const initialProvider = useRef(currentProvider);
   const initialModel = useRef(currentModel);
 
@@ -744,7 +783,7 @@ export function App() {
         ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
       ];
     },
-    [completedMessages]
+    [completedMessages, expandedTools]
   );
 
   const showLive =
@@ -765,7 +804,7 @@ export function App() {
               />
             );
           }
-          return <MessageItem key={item.msg.id} message={item.msg} />;
+          return <MessageItem key={item.msg.id} message={item.msg} expandedToolIds={expandedTools} onToggleExpand={toggleExpand} />;
         }}
       </Static>
 

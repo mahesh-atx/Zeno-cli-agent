@@ -189,7 +189,6 @@ case "apply_patch": {
     return `Patch failed: ${fileList} (${failed.length})`;
   }
   
-  // Dry run or no patches
   const dryRun = patches?.find(p => p.status === "DRY_RUN");
   if (dryRun) {
     const fileList = dryRun.path ? path.basename(dryRun.path) : "unknown";
@@ -197,6 +196,30 @@ case "apply_patch": {
   }
   
   return "patch applied";
+}
+case "read_many_files": {
+  const results = r.results as Array<{ path: string; success: boolean }> | undefined;
+  const totalFiles = r.totalFiles as number | undefined;
+  const totalTokens = r.totalTokens as number | undefined;
+  if (results) {
+    const ok = results.filter(x => x.success).length;
+    return `${ok}/${results.length} files${totalTokens ? `, ~${totalTokens} tokens` : ""}`;
+  }
+  return totalFiles ? `${totalFiles} files` : "read many files";
+}
+case "git_status": {
+  const isClean = r.isClean as boolean | undefined;
+  const branch = r.branch as string | undefined;
+  if (branch) return isClean ? `${branch} clean` : `${branch} dirty`;
+  return isClean ? "clean" : "dirty";
+}
+case "git_diff": {
+  const isEmpty = r.isEmpty as boolean | undefined;
+  return isEmpty ? "no changes" : "diff generated";
+}
+case "git_log": {
+  const count = r.count as number | undefined;
+  return count != null ? `${count} commits` : "log";
 }
     default:
       return "done";
