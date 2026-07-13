@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import type { ProviderName } from "../core/config";
 import type { Conversation } from "../core/conversation";
@@ -241,8 +242,175 @@ const handleStatus: CommandHandler = (_args, ctx) => {
   return { handled: true };
 };
 
+const handleSave: CommandHandler = (args, ctx) => {
+  const filePath = args[0] || ".cli-agent/session.md";
+  const resolved = path.resolve(process.cwd(), filePath);
+  try {
+    const messages = ctx.conversation.getHistory();
+    const lines: string[] = [
+      `# Zeno Session Export`,
+      `Date: ${new Date().toISOString()}`,
+      `Provider: ${ctx.currentProvider} / ${ctx.currentModel}`,
+      `---`,
+      "",
+    ];
+    for (const msg of messages) {
+      const role = msg.role.toUpperCase();
+      let content = "";
+      if (typeof msg.content === "string") {
+        content = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === "text") content += part.text + "\n";
+          if (part.type === "tool-call") content += `\n[Tool Call: ${part.toolName} ${JSON.stringify(part.args)}]\n`;
+          if (part.type === "tool-result") content += `\n[Tool Result: ${JSON.stringify(part.result).slice(0, 500)}]\n`;
+        }
+      }
+      lines.push(`## ${role}`, content, "");
+    }
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, lines.join("\n"), "utf-8");
+    ctx.pushNotice(`Session saved to ${filePath} (${messages.length} messages)`);
+  } catch (e: any) {
+    ctx.pushError(`Failed to save: ${e.message}`);
+  }
+  return { handled: true };
+};
+
+const handleResume: CommandHandler = (args, ctx) => {
+  const filePath = args[0] || ".cli-agent/session.json";
+  const resolved = path.resolve(process.cwd(), filePath);
+  try {
+    if (!fs.existsSync(resolved)) {
+      ctx.pushError(`No session file at ${filePath}. Use /save first.`);
+      return { handled: true };
+    }
+    const raw = fs.readFileSync(resolved, "utf-8");
+    let data: any;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      ctx.pushError(`Session file is not valid JSON: ${filePath}. Try markdown export?`);
+      return { handled: true };
+    }
+
+    const messages = data.messages || data.history || [];
+    if (!Array.isArray(messages) || messages.length === 0) {
+      ctx.pushError(`Session file empty or invalid: ${filePath}`);
+      return { handled: true };
+    }
+
+    ctx.conversation.clear();
+    for (const msg of messages) {
+      if (msg.role && msg.content) {
+        ctx.conversation.addMessage(msg);
+      }
+    }
+
+    const summary = ctx.contextManager.getSummary(ctx.conversation.getHistoryTokens());
+    ctx.setTokenCount(summary.used);
+    ctx.pushNotice(`Resumed session from ${filePath} (${messages.length} messages, ${summary.used.toLocaleString()} tokens)`);
+
+    // Push a visual notice of resumed messages
+    for (const msg of messages.slice(-6)) {
+      if (msg.role === "user" && typeof msg.content === "string") {
+        ctx.pushCompleted({ id: `resume-${Date.now()}-${Math.random()}`, role: "user", content: msg.content });
+      } else if (msg.role === "assistant" && typeof msg.content === "string") {
+        ctx.pushCompleted({ id: `resume-${Date.now()}-${Math.random()}`, role: "assistant", content: msg.content.slice(0, 500) });
+      }
+    }
+  } catch (e: any) {
+    ctx.pushError(`Failed to resume: ${e.message}`);
+  }
+  return { handled: true };
+};
+
+const handleCompact: CommandHandler = (_args, ctx) => {
+  const history = ctx.conversation.getHistory();
+  if (history.length <= 7) {
+    ctx.pushNotice("Nothing to compact — history is small.");
+    return { handled: true };
+  }
+
+  // Save current session as backup before compacting
+  try {
+    const backupPath = path.resolve(process.cwd(), `.cli-agent/session-backup-${Date.now()}.json`);
+    fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+    fs.writeFileSync(backupPath, JSON.stringify({ messages: history, timestamp: new Date().toISOString() }, null, 2), "utf-8");
+    ctx.pushNotice(`Backup saved to ${path.relative(process.cwd(), backupPath)}`);
+  } catch {
+    // ignore backup failure
+  }
+
+  const summary = ctx.contextManager.getSummary(ctx.conversation.getHistoryTokens());
+  if (summary.percent < 70) {
+    ctx.pushNotice(`Context at ${summary.percent.toFixed(0)}% — no need to compact yet.`);
+    return { handled: true };
+  }
+
+  // Use contextManager's truncateHistory but more aggressive: keep last 5 pairs
+  const allMessages = ctx.conversation.getMessages();
+  const truncated = ctx.contextManager.truncateHistory(allMessages);
+  
+  if (truncated.removedCount > 0) {
+    ctx.conversation.applyTruncatedHistory(truncated.truncated);
+    const newSummary = ctx.contextManager.getSummary(ctx.conversation.getHistoryTokens());
+    ctx.setTokenCount(newSummary.used);
+    ctx.pushNotice(
+      `Compacted history: removed ${truncated.removedCount} messages, saved ~${truncated.tokensSaved.toLocaleString()} tokens. ` +
+      `Now ${newSummary.used.toLocaleString()} / ${newSummary.total.toLocaleString()} (${newSummary.percent.toFixed(1)}%)`
+    );
+  } else {
+    ctx.pushNotice("Could not compact further — at minimum retention.");
+  }
+
+  return { handled: true };
+};
+
+const handleExport: CommandHandler = (args, ctx) => {
+  // Alias for /save but JSON format for resume
+  const filePath = args[0] || ".cli-agent/session.json";
+  const resolved = path.resolve(process.cwd(), filePath);
+  try {
+    const history = ctx.conversation.getHistory();
+    const data = {
+      version: 1,
+      provider: ctx.currentProvider,
+      model: ctx.currentModel,
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+      messages: history,
+      contextFiles: ctx.contextManager.getFiles().map(f => f.filePath),
+    };
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, JSON.stringify(data, null, 2), "utf-8");
+    ctx.pushNotice(`Session exported to ${filePath} (${history.length} messages) — use /resume to restore`);
+  } catch (e: any) {
+    ctx.pushError(`Export failed: ${e.message}`);
+  }
+  return { handled: true };
+};
+
 const handleExit: CommandHandler = (_args, ctx) => {
-  ctx.pushNotice("Goodbye.");
+  // Auto-save session on exit (P2)
+  try {
+    const sessionPath = path.resolve(process.cwd(), ".cli-agent/session.json");
+    const history = ctx.conversation.getHistory();
+    if (history.length > 0) {
+      const data = {
+        version: 1,
+        provider: ctx.currentProvider,
+        model: ctx.currentModel,
+        timestamp: new Date().toISOString(),
+        messages: history,
+      };
+      fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+      fs.writeFileSync(sessionPath, JSON.stringify(data, null, 2), "utf-8");
+    }
+  } catch {
+    // ignore auto-save failure
+  }
+  ctx.pushNotice("Goodbye. Session auto-saved to .cli-agent/session.json (use /resume to restore).");
   setTimeout(() => ctx.exitApp(), 200);
   return { handled: true };
 };
@@ -308,13 +476,36 @@ export const COMMANDS: Array<CommandMeta & { handler: CommandHandler }> = [
     handler: handleRetry,
   },
   {
+    name: "/save",
+    description: "Save conversation to markdown file",
+    usage: "[file]",
+    handler: handleSave,
+  },
+  {
+    name: "/export",
+    description: "Export session to JSON for /resume",
+    usage: "[file]",
+    handler: handleExport,
+  },
+  {
+    name: "/resume",
+    description: "Resume conversation from JSON file",
+    usage: "[file]",
+    handler: handleResume,
+  },
+  {
+    name: "/compact",
+    description: "Compact history to save tokens (keeps last pairs)",
+    handler: handleCompact,
+  },
+  {
     name: "/clear",
     description: "Clear conversation + context",
     handler: handleClear,
   },
   {
     name: "/exit",
-    description: "Quit the agent",
+    description: "Quit the agent (auto-saves session)",
     aliases: ["/quit", "/q"],
     handler: handleExit,
   },

@@ -16,6 +16,10 @@ import { TodoWriteSchema, todoWrite } from "./todoWrite";
 import { AskQuestionSchema, askQuestion } from "./askQuestion";
 import { SendMessageSchema, sendMessage } from "./sendMessage";
 import { ApplyPatchSchema, applyPatch } from "./applyPatch";
+import { ReadManyFilesSchema, readManyFiles } from "./readManyFiles";
+import { GitStatusSchema, gitStatus } from "./gitStatus";
+import { GitDiffSchema, gitDiff } from "./gitDiff";
+import { GitLogSchema, gitLog } from "./gitLog";
 
 // ─── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -176,6 +180,34 @@ export const TOOLS: ToolDefinition[] = [
       "Apply unified diff patch to one or more files. Max 10 files, 100 hunks, 2MB patch. Supports fuzzy drift up to 15 lines with accurate offset fix. Validates all before writing, atomic writes, dryRun. Use after reading files.",
     schema: ApplyPatchSchema,
     execute: wrapExecute("apply_patch", ApplyPatchSchema, applyPatch as any),
+  },
+  {
+    name: "read_many_files",
+    description:
+      "Read multiple files in parallel (max 10). Each file checked for binary, size (5MB), safe path. Returns combined tokens/bytes. Use to reduce roundtrips when you need several files at once.",
+    schema: ReadManyFilesSchema,
+    execute: wrapExecute("read_many_files", ReadManyFilesSchema, readManyFiles as any),
+  },
+  {
+    name: "git_status",
+    description:
+      "Show git working tree status (like git status --porcelain). Reports branch, clean/dirty, changes. No permission needed (read-only).",
+    schema: GitStatusSchema,
+    execute: wrapExecute("git_status", GitStatusSchema, gitStatus as any),
+  },
+  {
+    name: "git_diff",
+    description:
+      "Show git diff (unstaged by default, staged with staged:true). Supports path filter and stat summary. Truncates large diffs to 30k chars. Read-only.",
+    schema: GitDiffSchema,
+    execute: wrapExecute("git_diff", GitDiffSchema, gitDiff as any),
+  },
+  {
+    name: "git_log",
+    description:
+      "Show git commit history (default 20, max 100). Supports oneline and path filter. Read-only, useful to understand recent changes.",
+    schema: GitLogSchema,
+    execute: wrapExecute("git_log", GitLogSchema, gitLog as any),
   },
 ];
 
