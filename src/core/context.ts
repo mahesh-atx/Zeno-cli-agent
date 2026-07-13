@@ -1,9 +1,10 @@
 // src/core/context.ts
 import * as fs from "fs";
 import * as path from "path";
-import { countTokens } from "../utils/tokens";
+import { countTokens, countMessageTokens } from "../utils/tokens";
 import type { Message } from "./conversation";
 import { TOKEN_LIMITS } from "../providers/registry";
+import type { ProviderName } from "./config";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,20 @@ const WARNING_THRESHOLD = 0.70;
 const MAX_FILE_TOKENS = 50000;
 const MIN_MESSAGES_TO_KEEP = 7;
 
+function getTokenLimitForProvider(provider: string): number {
+  return TOKEN_LIMITS[provider as ProviderName] ?? 128000;
+}
+
+function safeCountMessageTokens(msg: Message): number {
+  try {
+    return countMessageTokens(msg as any);
+  } catch {
+    // Fallback to simple string length if counting fails
+    const content = typeof (msg as any).content === "string" ? (msg as any).content : JSON.stringify((msg as any).content);
+    return countTokens(content) + 4;
+  }
+}
+
 // ─── Context Manager ──────────────────────────────────────────────────────────
 
 export class ContextManager {
@@ -58,7 +73,6 @@ export class ContextManager {
     lines?: number;
   } {
     try {
-      // Use shared guards — dynamic require to avoid circular import issues
       const guards = require("../tools/guards") as typeof import("../tools/guards");
       const safe = guards.assertSafePath(filePath);
       if (safe.error) {
@@ -100,7 +114,6 @@ export class ContextManager {
         };
       }
 
-      // Total context limit check (P1 fix)
       const currentFileTokens = this.getFileTokens();
       const limit = this.getTokenLimit();
       if (currentFileTokens + tokens > limit * 0.8) {
@@ -122,7 +135,6 @@ export class ContextManager {
 
       return { success: true, tokens, lines };
     } catch {
-      // Fallback without guards
       const resolved = path.resolve(process.cwd(), filePath);
       if (!fs.existsSync(resolved)) {
         return { success: false, error: `File not found: ${filePath}` };
@@ -214,7 +226,7 @@ export class ContextManager {
   }
 
   getTokenLimit(): number {
-    return TOKEN_LIMITS[this.provider] ?? 128000;
+    return getTokenLimitForProvider(this.provider);
   }
 
   getTotalTokensUsed(historyTokens: number): number {
@@ -266,10 +278,7 @@ export class ContextManager {
 
     while (working.length > MIN_MESSAGES_TO_KEEP - 1) {
       const fileTokens = this.getFileTokens();
-      const histTokens = working.reduce(
-        (acc, m) => acc + countTokens(m.content) + 4,
-        0
-      );
+      const histTokens = working.reduce((acc, m) => acc + safeCountMessageTokens(m), 0);
       const used = fileTokens + histTokens;
       const limit = this.getTokenLimit();
 
@@ -277,14 +286,11 @@ export class ContextManager {
 
       if (working.length >= 2) {
         const removed = working.slice(0, 2);
-        tokensSaved += removed.reduce(
-          (acc, m) => acc + countTokens(m.content) + 4,
-          0
-        );
+        tokensSaved += removed.reduce((acc, m) => acc + safeCountMessageTokens(m), 0);
         working = working.slice(2);
         removedCount += 2;
       } else {
-        tokensSaved += countTokens(working[0].content) + 4;
+        tokensSaved += safeCountMessageTokens(working[0]);
         working = [];
         removedCount += 1;
         break;

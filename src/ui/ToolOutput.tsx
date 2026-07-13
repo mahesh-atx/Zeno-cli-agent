@@ -37,6 +37,22 @@ function StatusIcon({ status }: { status: ToolStatus }) {
   }
 }
 
+function formatInput(input: Record<string, unknown>): string {
+  if (Object.keys(input).length === 0) return "";
+  const primaryKeys = ["path", "file", "url", "query", "CommandLine", "pattern", "message", "question"];
+  let primaryValue;
+  for (const key of primaryKeys) {
+    if (input[key] !== undefined) {
+      primaryValue = input[key];
+      break;
+    }
+  }
+  if (primaryValue === undefined) primaryValue = Object.values(input)[0];
+  const str = typeof primaryValue === "string" ? primaryValue : JSON.stringify(primaryValue);
+  const truncated = str.length > 50 ? str.slice(0, 50) + "..." : str;
+  return `(${truncated})`;
+}
+
 function useExpandable(isLast: boolean | undefined, initial = false) {
   const [isExpanded, setIsExpanded] = useState(initial);
   
@@ -61,7 +77,7 @@ function ReadManyFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?
   const results = raw?.results as Array<{ path: string; success: boolean; lines?: number; tokens?: number; error?: string }> | undefined;
   const totalFiles = paths.length;
   const successCount = results ? results.filter(r => r.success).length : 0;
-  const displayFiles = results || paths.map(p => ({ path: p, success: true }));
+  const displayFiles = (results || paths.map(p => ({ path: p, success: true }))) as Array<{ path: string; success: boolean; lines?: number; tokens?: number; error?: string }>;
 
   // Also allow internal toggle via ctrl+r global, but we handle via useExpandable
   // isExpanded state is local, not dependent on parent Static re-render

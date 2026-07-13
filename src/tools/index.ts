@@ -1,5 +1,5 @@
 // src/tools/index.ts
-import { z, ZodError, ZodObject, ZodRawShape } from "zod";
+import { z, ZodError } from "zod";
 
 import { ReadFileSchema, readFile } from "./readFile";
 import { WriteFileSchema, writeFile } from "./writeFile";
@@ -26,24 +26,22 @@ import { GitLogSchema, gitLog } from "./gitLog";
 export interface ToolDefinition {
   name: string;
   description: string;
-  schema: z.ZodObject<z.ZodRawShape>;
+  schema: z.ZodTypeAny;
   execute: (input: unknown) => Promise<unknown>;
 }
 
 // ─── Tool Wrapper ────────────────────────────────────────────────────────────
 
-function wrapExecute<Schema extends ZodObject<ZodRawShape>, Output>(
+function wrapExecute<Schema extends z.ZodTypeAny, Output>(
   name: string,
   schema: Schema,
   fn: (input: z.infer<Schema>) => Promise<Output>
 ): (input: unknown) => Promise<unknown> {
   return async (rawInput: unknown) => {
     try {
-      // 1. Parse once in wrapper (single source of validation)
       const parsed = schema.parse(rawInput) as z.infer<Schema>;
       const result = await fn(parsed);
 
-      // Hint injection for LLM attention
       if (result && typeof result === "object" && "hints" in result) {
         const res = result as Record<string, unknown>;
         if (Array.isArray(res.hints) && (res.hints as string[]).length > 0) {
@@ -211,21 +209,17 @@ export const TOOLS: ToolDefinition[] = [
   },
 ];
 
-// ─── Lookup ──────────────────────────────────────────────────────────────────
-
 export function getTool(name: string): ToolDefinition | undefined {
   return TOOLS.find((t) => t.name === name);
 }
 
-// ─── AI SDK Tool Format ──────────────────────────────────────────────────────
-
 export function buildAISDKTools(): Record<
   string,
-  { description: string; parameters: z.ZodObject<z.ZodRawShape> }
+  { description: string; parameters: z.ZodTypeAny }
 > {
   const result: Record<
     string,
-    { description: string; parameters: z.ZodObject<z.ZodRawShape> }
+    { description: string; parameters: z.ZodTypeAny }
   > = {};
 
   for (const tool of TOOLS) {

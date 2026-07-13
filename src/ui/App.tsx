@@ -715,59 +715,13 @@ export function App() {
     pushNotice("Question cancelled. Type a message to continue.");
   }, [pushNotice]);
 
-  // Unified input handler: Ctrl+C exit, Ctrl+R/E expand, R retry
+  // Input handlers: Ctrl+C exit, R retry (expand now handled inside ToolOutput via its own useInput)
   useInput(
     (input, key) => {
       if (key.ctrl && input.toLowerCase() === "c") {
         process.exit(0);
         return;
       }
-      // Ctrl+R or Ctrl+E to expand/collapse last expandable tool
-      // Plain 'e' also works when loading (InputBar disabled) to allow expansion during streaming
-      const isExpandKey = (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) || 
-                          (!key.ctrl && !key.meta && input.toLowerCase() === "e" && isLoading && !isMenuOpen);
-
-      if (isExpandKey) {
-        const expandableTools = new Set([
-          "read_many_files",
-          "list_files",
-          "glob_files",
-          "search_files",
-          "git_status",
-          "git_diff",
-          "git_log",
-          "read_file",
-          "run_command",
-        ]);
-        let found = false;
-        for (let i = completedMessages.length - 1; i >= 0; i--) {
-          const msg = completedMessages[i];
-          if (msg.toolCalls) {
-            for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
-              const tc = msg.toolCalls[j];
-              if (expandableTools.has(tc.toolName)) {
-                toggleExpand(tc.id);
-                // silent toggle, no notice to avoid clutter
-                found = true;
-                return;
-              }
-            }
-          }
-        }
-        if (livePreview.activeTool && expandableTools.has(livePreview.activeTool.toolName)) {
-          toggleExpand(livePreview.activeTool.id);
-          // silent toggle for live preview
-          found = true;
-          return;
-        }
-        if (!found && (key.ctrl && input.toLowerCase() === "r")) {
-          // Only show notice for ctrl+r, not for plain e to avoid noise while typing
-          // no notice to avoid clutter when no expandable tool
-        }
-        return;
-      }
-
-      // R retry only when network dropped and not ctrl
       if (!key.ctrl && !key.meta && (input === "r" || input === "R") && networkDropped) {
         retryPressedRef.current = true;
         setNetworkDropped(false);
