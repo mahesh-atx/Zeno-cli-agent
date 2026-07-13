@@ -222,6 +222,16 @@ export function App() {
       else next.add(id);
       return next;
     });
+    // Also update live preview if it's the same tool
+    setLivePreview(prev => {
+      if (prev.activeTool && prev.activeTool.id === id) {
+        return {
+          ...prev,
+          activeTool: { ...prev.activeTool, isExpanded: !prev.activeTool.isExpanded },
+        };
+      }
+      return prev;
+    });
   }, []);
 
   const handleThemeConfirm = useCallback(
@@ -726,47 +736,49 @@ export function App() {
     pushNotice("Question cancelled. Type a message to continue.");
   }, [pushNotice]);
 
-  // Ctrl+C always active, R retry only when network dropped — separate concerns
+  // Unified input handler: Ctrl+C always, Ctrl+R expand, R retry
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "c") process.exit(0);
-    },
-    { isActive: true }
-  );
-
-  useInput(
-    (input) => {
-      if ((input === "r" || input === "R") && networkDropped) {
-        retryPressedRef.current = true;
-        setNetworkDropped(false);
-        setAgentStatus("retrying");
-        pushNotice("Retrying connection...");
+      if (key.ctrl && input === "c") {
+        process.exit(0);
       }
-    },
-    { isActive: networkDropped }
-  );
-
-  // Ctrl+R to expand/collapse last read_many_files
-  useInput(
-    (input, key) => {
       if (key.ctrl && input.toLowerCase() === "r") {
-        // Find last read_many_files tool in history
+        // Expand/collapse last expandable tool (read_many_files, list_files, glob_files, search_files, git_*, etc.)
+        const expandableTools = new Set([
+          "read_many_files",
+          "list_files",
+          "glob_files",
+          "search_files",
+          "git_status",
+          "git_diff",
+          "git_log",
+          "read_file",
+        ]);
+        // Check completed messages from last to first
         for (let i = completedMessages.length - 1; i >= 0; i--) {
           const msg = completedMessages[i];
           if (msg.toolCalls) {
             for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
               const tc = msg.toolCalls[j];
-              if (tc.toolName === "read_many_files") {
+              if (expandableTools.has(tc.toolName)) {
                 toggleExpand(tc.id);
                 return;
               }
             }
           }
         }
-        // Also check live preview active tool
-        if (livePreview.activeTool && livePreview.activeTool.toolName === "read_many_files") {
+        // Also check live preview
+        if (livePreview.activeTool && expandableTools.has(livePreview.activeTool.toolName)) {
           toggleExpand(livePreview.activeTool.id);
         }
+        return;
+      }
+      // R retry only when network dropped and not ctrl
+      if (!key.ctrl && (input === "r" || input === "R") && networkDropped) {
+        retryPressedRef.current = true;
+        setNetworkDropped(false);
+        setAgentStatus("retrying");
+        pushNotice("Retrying connection...");
       }
     },
     { isActive: true }
