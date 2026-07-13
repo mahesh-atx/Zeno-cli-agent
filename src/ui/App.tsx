@@ -768,7 +768,7 @@ export function App() {
               const tc = msg.toolCalls[j];
               if (expandableTools.has(tc.toolName)) {
                 toggleExpand(tc.id);
-                pushNotice(`${expandedTools.has(tc.id) ? "Collapsed" : "Expanded"} ${tc.toolName} (${tc.id.slice(0,8)}) — ${!expandedTools.has(tc.id) ? "showing details" : "collapsed"}`);
+                // silent toggle, no notice to avoid clutter
                 found = true;
                 return;
               }
@@ -777,13 +777,13 @@ export function App() {
         }
         if (livePreview.activeTool && expandableTools.has(livePreview.activeTool.toolName)) {
           toggleExpand(livePreview.activeTool.id);
-          pushNotice(`Toggled ${livePreview.activeTool.toolName} preview`);
+          // silent toggle for live preview
           found = true;
           return;
         }
         if (!found && (key.ctrl && input.toLowerCase() === "r")) {
           // Only show notice for ctrl+r, not for plain e to avoid noise while typing
-          pushNotice("No expandable tool found. Run read_many_files, list_files, glob_files, grep, git tools, etc.");
+          // no notice to avoid clutter when no expandable tool
         }
         return;
       }

@@ -250,6 +250,7 @@ function ReadFileOutput({ toolCall }: { toolCall: ToolCall }) {
   const pathArg = (toolCall.input as any).path || "file";
   const content = raw?.content as string | undefined;
   const lines = raw?.lines as number | undefined;
+  const totalLines = raw?.totalLines as number | undefined;
   const size = raw?.size as number | undefined;
 
   if (toolCall.status === "running") {
@@ -263,22 +264,24 @@ function ReadFileOutput({ toolCall }: { toolCall: ToolCall }) {
   if (!isExpanded) {
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read</Text><Text color="white" bold>{` (${pathArg})`}</Text>{lines !== undefined && <Text color="white"> — {lines} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text>}</Box>
-        <Box marginLeft={4}><Text dimColor>└  </Text><Text color="white">{toolCall.resultSummary || "done"}</Text></Box>
-        {content && content.split("\n").length > 5 && <Box marginLeft={6}><Text dimColor>   (ctrl+r to expand preview)</Text></Box>}
+        <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read</Text><Text color="white" bold>{` (${pathArg})`}</Text></Box>
+        <Box marginLeft={4} flexDirection="column">
+          <Box><Text dimColor>└  </Text><Text color="white">{lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Box>
+          <Box marginLeft={2}><Text dimColor>   (ctrl+r to expand)</Text></Box>
+        </Box>
       </Box>
     );
   }
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text><Text color="white"> — {lines ?? "?"} lines</Text></Box>
+      <Box><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text><Text color="white"> — {lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Box>
       {content && (
         <Box marginLeft={4} flexDirection="column">
-          {content.split("\n").slice(0, 20).map((line, idx) => (
-            <Box key={idx}><Text dimColor>{idx === 19 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 80)}</Text></Box>
+          {content.split("\n").slice(0, 15).map((line, idx, arr) => (
+            <Box key={idx}><Text dimColor>{idx === arr.length - 1 || idx === 14 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Box>
           ))}
-          {content.split("\n").length > 20 && <Box><Text dimColor>   ... {content.split("\n").length - 20} more lines</Text></Box>}
+          {content.split("\n").length > 15 && <Box marginLeft={0}><Text dimColor>   ... {content.split("\n").length - 15} more lines</Text></Box>}
           <Box marginLeft={2}><Text dimColor>   (ctrl+r to collapse)</Text></Box>
         </Box>
       )}
