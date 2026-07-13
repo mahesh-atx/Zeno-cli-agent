@@ -21,25 +21,19 @@ const MAX_PREVIEW_LINES = 12;
 export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePreviewProps) {
   if (thinkingOnly) {
     return (
-      <Box marginTop={1} paddingX={1}>
-        <Text color={Colors.AccentCyan}>
+      <Box marginTop={1} paddingX={0}>
+        <Text color={Colors.AccentYellow}>
           <Spinner type="dots" />
         </Text>
-        <Text color={Colors.AccentCyan} bold> Thinking</Text>
-        <Text color={Colors.Gray}>…</Text>
+        <Text color={Colors.AccentYellow} bold> Thinking...</Text>
       </Box>
     );
   }
 
   if (activeTool) {
     return (
-      <Box marginTop={1} paddingX={1} flexDirection="column">
-        <Box>
-          <Text color={Colors.AccentCyan}>
-            <Spinner type="dots" />
-          </Text>
-          <Text color={Colors.AccentCyan} bold> Running {activeTool.toolName}</Text>
-        </Box>
+      <Box marginTop={hideIcon ? 0 : 1} flexDirection="column">
+        <ToolOutput toolCall={activeTool} />
       </Box>
     );
   }
@@ -53,17 +47,18 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
   const rendered = renderStreaming(tail.join("\n"));
 
   return (
-    <Box marginTop={hideIcon ? 0 : 1} paddingX={1} flexDirection="column">
-      {!hideIcon && (
-        <Box>
-          <Text color={Colors.AccentCyan} bold>✻ </Text>
-          <Text color={Colors.Gray} dimColor>
-            {hasOverflow
-              ? `streaming (showing last ${MAX_PREVIEW_LINES} of ${rawLines.length} lines)…`
-              : "streaming…"}
-          </Text>
-        </Box>
-      )}
+    <Box marginTop={hideIcon ? 0 : 1} paddingX={0} flexDirection="column">
+      <Box>
+        <Text color={Colors.AccentYellow}>
+          <Spinner type="dots" />
+        </Text>
+        <Text color={Colors.AccentYellow} bold> Streaming...</Text>
+        <Text color={Colors.Gray} dimColor>
+          {hasOverflow
+            ? ` (showing last ${MAX_PREVIEW_LINES} of ${rawLines.length} lines)`
+            : ""}
+        </Text>
+      </Box>
       <Box flexDirection="column" marginLeft={2}>
         <Ansi wrap="wrap">
           {rendered}

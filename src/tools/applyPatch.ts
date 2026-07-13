@@ -31,6 +31,7 @@ export interface ApplyPatchOutput {
   success: true;
   dryRun: boolean;
   patches: PatchResult[];
+  hunks?: import("diff").StructuredPatchHunk[];
   hints?: string[];
 }
 
@@ -372,6 +373,7 @@ export async function applyPatch(
     success: true,
     dryRun: false,
     patches,
+    hunks: parsed ? parsed.flatMap((p) => p.hunks) : undefined,
     hints:
       appliedPatches.length > 1
         ? ["All files patched successfully. Run your tests to verify the changes."]

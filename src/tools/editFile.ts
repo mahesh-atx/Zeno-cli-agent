@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { askPermission } from "../core/permissions";
+import { getPatchForDisplay } from "../utils/diff";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export interface EditFileOutput {
   path: string;
   linesChanged: number;
   preview: string;
+  hunks?: import("diff").StructuredPatchHunk[];
   hints?: string[]; // NEW
 }
 
@@ -246,6 +248,11 @@ export async function editFile(input: EditFileInput): Promise<EditFileResult> {
       path: input.path,
       linesChanged,
       preview: diffLines.join("\n"),
+      hunks: getPatchForDisplay({
+        filePath: input.path,
+        fileContents: content,
+        edits: [{ old_string: actualSearchString, new_string: input.replaceString }]
+      }),
       ...(hints.length > 0 && { hints }),
     };
   } catch (error: any) {

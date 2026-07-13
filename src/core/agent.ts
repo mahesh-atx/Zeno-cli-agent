@@ -122,8 +122,8 @@ export function getToolResultSummary(toolName: string, result: unknown): string 
         ? `${r.lines} lines, ${r.size} bytes`
         : "done";
     case "write_file":
-      return r.path != null
-        ? `${r.isNew ? "Created" : "Updated"}: ${r.path}`
+      return r.isNew != null
+        ? `${r.isNew ? "Created" : "Updated"}`
         : "done";
     case "edit_file":
       return r.linesChanged != null
@@ -341,43 +341,96 @@ export async function runAgent(options: AgentOptions): Promise<string> {
   const providerModel = buildProviderModel(provider, model);
   const aiTools = buildAISDKTools();
 
-  const messages = conversation.getMessages().map((msg) => ({
-    role: msg.role as "system" | "user" | "assistant",
-    content: msg.content,
-  }));
-
   let fullAssistantText = "";
   let iterationCount = 0;
+  let streamRetries = 0;
 
   while (iterationCount < MAX_ITERATIONS) {
     iterationCount++;
 
-    const pendingToolCalls: Array<{ toolName: string; input: unknown }> = [];
+    const pendingToolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }> = [];
+    let streamResult: ReturnType<typeof streamText> | null = null;
+    let chunkText = "";
 
     // ── HTTP call with retry loop ──────────────────────────────
-    let streamResult: ReturnType<typeof streamText> | null = null;
-    let attempt = 0;
-
-    while (attempt < MAX_RETRIES) {
-      attempt++;
+    while (streamRetries < MAX_RETRIES) {
+      streamRetries++;
+      const messages = conversation.getMessages();
 
       try {
         streamResult = streamText({
           model: providerModel,
-          messages,
+          messages: messages as any, // CoreMessage mapped correctly
           tools: aiTools,
           maxSteps: 1,
           temperature: config.temperature,
           maxTokens: config.maxTokens,
         });
 
-        // Attempt to access the stream — this is where SDK throws
-        // We need to force evaluation to catch HTTP errors here.
-        // If streamText is lazy, the error surfaces during iteration below.
-        break; // Success — exit retry loop
+        // ── Stream consumption ─────────────────────────────────
+        chunkText = "";
+        pendingToolCalls.length = 0; // reset for retries
+
+        for await (const chunk of streamResult.fullStream) {
+          if (chunk.type === "text-delta") {
+            const token = chunk.textDelta;
+            chunkText += token;
+            if (onToken) onToken(token);
+          } else if (chunk.type === "tool-call") {
+            pendingToolCalls.push({
+              toolCallId: chunk.toolCallId,
+              toolName: chunk.toolName,
+              input: chunk.args,
+            });
+          } else if (chunk.type === "error") {
+            // The AI SDK surfaces some failures (e.g. tool-schema
+            // serialization, mid-stream network drops) as error chunks
+            // rather than thrown exceptions. Re-throw so the catch block
+            // below routes them through the same retry/event pipeline —
+            // otherwise the stream ends silently with no tool call and
+            // no error shown to the user.
+            throw chunk.error;
+          }
+        }
+
+        // ── Output-truncation detection ────────────────────────
+        // When the model hits maxTokens mid-generation it is cut off.
+        // If it was mid-tool-call, the JSON arguments are truncated, so
+        // the AI SDK emits NO tool-call chunk (the args never parse) and
+        // the loop would otherwise exit with empty text and no tool call
+        // — the silent "ghost" where the spinner stops with no response.
+        // finishReason "length" means the output was truncated by the
+        // token limit; surface a clear, actionable error instead.
+        if (chunkText.length === 0 && pendingToolCalls.length === 0) {
+          let finishReason: unknown = undefined;
+          try {
+            finishReason = await streamResult.finishReason;
+          } catch {
+            // Some provider/SDK versions reject awaiting finishReason
+            // after an aborted stream — treat as unknown and fall through.
+          }
+          if (finishReason === "length") {
+            const event = makeToolErrorEvent(
+              "maxTokens",
+              new Error(
+                `Output was truncated at ${config.maxTokens} tokens before the model ` +
+                `could finish its response (finishReason: "length"). This usually means ` +
+                `the file or edit was too large to emit in one tool call within the ` +
+                `current MAX_TOKENS limit. Raise MAX_TOKENS in .env (e.g. 16384) or ask ` +
+                `for the change in smaller chunks.`
+              )
+            );
+            if (onAgentEvent) onAgentEvent(event);
+            if (onFatalError) onFatalError(event);
+            if (onError) onError(new Error(event.message));
+            return fullAssistantText;
+          }
+        }
+
+        break; // Success — stream fully consumed, exit retry loop!
 
       } catch (rawError) {
-        const event = translateProviderError(provider, rawError, attempt);
+        const event = translateProviderError(provider, rawError, streamRetries);
 
         if (onAgentEvent) onAgentEvent(event);
 
@@ -389,12 +442,12 @@ export async function runAgent(options: AgentOptions): Promise<string> {
 
         // ── Server error: exponential backoff ──
         if (isServerErrorEvent(event)) {
-          if (attempt >= MAX_RETRIES) {
+          if (streamRetries >= MAX_RETRIES) {
             if (onFatalError) onFatalError(event);
             if (onError) onError(new Error(event.message));
             return fullAssistantText;
           }
-          const backoff = getBackoffMs(attempt);
+          const backoff = getBackoffMs(streamRetries);
           await sleep(backoff);
           continue; // retry
         }
@@ -406,20 +459,13 @@ export async function runAgent(options: AgentOptions): Promise<string> {
             await waitForUserRetry(retrySignal);
             continue; // retry
           }
-          // No retry signal wired — treat as fatal for this attempt
+          // No retry signal wired — treat as fatal
           if (onFatalError) onFatalError(event);
           if (onError) onError(new Error(event.message));
           return fullAssistantText;
         }
 
-        // ── Auth error: unrecoverable — hand to UI ──
-        if (isAuthEvent(event)) {
-          if (onFatalError) onFatalError(event);
-          if (onError) onError(new Error(event.message));
-          return fullAssistantText;
-        }
-
-        // ── Unknown: stop ──
+        // ── Auth error or Unknown: unrecoverable ──
         if (onFatalError) onFatalError(event);
         if (onError) onError(new Error(event.message));
         return fullAssistantText;
@@ -428,53 +474,37 @@ export async function runAgent(options: AgentOptions): Promise<string> {
 
     if (!streamResult) break;
 
-    // ── Stream consumption with mid-stream error handling ──────
-    try {
-      let chunkText = "";
+    fullAssistantText += chunkText;
 
-      for await (const chunk of streamResult.fullStream) {
-        if (chunk.type === "text-delta") {
-          const token = chunk.textDelta;
-          chunkText += token;
-          fullAssistantText += token;
-          if (onToken) onToken(token);
-        } else if (chunk.type === "tool-call") {
-          pendingToolCalls.push({
-            toolName: chunk.toolName,
-            input: chunk.args,
-          });
-        }
-      }
-
-      // No tool calls → done
-      if (pendingToolCalls.length === 0) break;
-
+    // Save assistant message to conversation
+    if (chunkText || pendingToolCalls.length > 0) {
+      const assistantContent: any[] = [];
       if (chunkText) {
-        messages.push({ role: "assistant", content: chunkText });
+        assistantContent.push({ type: "text", text: chunkText });
       }
-
-    } catch (streamError) {
-      // Mid-stream errors (connection drops mid-response)
-      const event = translateProviderError(provider, streamError, attempt);
-
-      if (onAgentEvent) onAgentEvent(event);
-
-      if (isNetworkEvent(event)) {
-        if (onNetworkDrop) onNetworkDrop(event);
-        if (retrySignal) {
-          await waitForUserRetry(retrySignal);
-          iterationCount--; // Retry this iteration
-          continue;
-        }
+      for (const tc of pendingToolCalls) {
+        assistantContent.push({
+          type: "tool-call",
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          args: tc.input,
+        });
       }
-
-      if (onFatalError) onFatalError(event);
-      if (onError) onError(new Error(event.message));
-      return fullAssistantText;
+      
+      if (assistantContent.length === 1 && assistantContent[0].type === "text") {
+        conversation.addMessage({ role: "assistant", content: chunkText });
+      } else if (assistantContent.length > 0) {
+        conversation.addMessage({ role: "assistant", content: assistantContent });
+      }
     }
 
+    if (pendingToolCalls.length === 0) break;
+
     // ── Tool execution ─────────────────────────────────────────
-    for (const { toolName, input } of pendingToolCalls) {
+    const toolResultBlocks: any[] = [];
+
+    for (const tc of pendingToolCalls) {
+      const { toolName, input } = tc;
       if (onToolCall) onToolCall(toolName, input);
 
       const toolDef = getTool(toolName);
@@ -487,9 +517,11 @@ export async function runAgent(options: AgentOptions): Promise<string> {
           toolName,
         };
         if (onToolResult) onToolResult(toolName, errResult);
-        messages.push({
-          role: "user",
-          content: `Tool result for ${toolName}:\n${JSON.stringify(errResult, null, 2)}`,
+        toolResultBlocks.push({
+          type: "tool-result",
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          result: errResult,
         });
         continue;
       }
@@ -550,10 +582,20 @@ export async function runAgent(options: AgentOptions): Promise<string> {
         }
       }
 
-      // Feed tool result back to LLM (including errors — LLM self-corrects)
-      messages.push({
-        role: "user",
-        content: `Tool result for ${toolName}:\n${JSON.stringify(toolResult, null, 2)}`,
+      // Feed tool result back to LLM
+      toolResultBlocks.push({
+        type: "tool-result",
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        result: toolResult,
+      });
+    }
+
+    // Save ALL tool results as a single tool message block
+    if (toolResultBlocks.length > 0) {
+      conversation.addMessage({
+        role: "tool",
+        content: toolResultBlocks,
       });
     }
   }

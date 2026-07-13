@@ -3,15 +3,13 @@ import { countHistoryTokens, countMessageTokens } from "../utils/tokens";
 
 // ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export interface Message {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+import type { CoreMessage } from "ai";
+export type Message = CoreMessage;
 
 // ━━━ Conversation Manager ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export class Conversation {
-  private messages: Message[] = [];
+  private messages: CoreMessage[] = [];
   private systemPrompt: string;
   private baseSystemPrompt: string;
 
@@ -121,6 +119,10 @@ export class Conversation {
 
   addAssistantMessage(content: string): void {
     this.messages.push({ role: "assistant", content });
+  }
+
+  addMessage(message: CoreMessage): void {
+    this.messages.push(message);
   }
 
   // ─── Read Messages ────────────────────────────────────────────

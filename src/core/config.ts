@@ -106,9 +106,13 @@ function loadConfig(): Config {
     nvidiaApiKey: process.env.NVIDIA_API_KEY || null,
     opencodezenApiKey: process.env.OPENCODEZEN_API_KEY || null,
     defaultProvider: rawProvider,
-    defaultModel: process.env.DEFAULT_MODEL ?? "openai/gpt-4o-mini",
+    defaultModel: process.env.DEFAULT_MODEL ?? "poolside/laguna-m.1:free",
     temperature: readNumber("TEMPERATURE", 0.7),
-    maxTokens: readNumber("MAX_TOKENS", 4096),
+    // 4096 is too small for a file-editing agent: a single write_file or
+    // edit_file tool call must echo the full file content as arguments, and
+    // models get truncated mid-argument (finishReason: "length"), producing a
+    // silent no-op turn. 16384 leaves headroom for whole-file edits.
+    maxTokens: readNumber("MAX_TOKENS", 16384),
   };
 
   validateConfig(config);

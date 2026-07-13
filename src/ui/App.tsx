@@ -14,7 +14,6 @@ import type { ProviderName } from "../core/config";
 import { config } from "../core/config";
 import { Conversation } from "../core/conversation";
 import { runAgent, getToolResultSummary } from "../core/agent";
-import { PROVIDER_MODELS } from "../providers";
 import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
 import { QuestionPrompt } from "./QuestionPrompt";
@@ -28,6 +27,11 @@ import {
   isAgentTurnEndEvent 
 } from "../errors/base";
 import { useTerminalWidth } from "./hooks/useTerminalWidth";
+import {
+  isSlashCommand,
+  dispatchCommand,
+  type CommandContext,
+} from "../commands";
 
 const TOKEN_LIMITS: Record<ProviderName, number> = {
   openrouter: 128000,
@@ -148,6 +152,15 @@ export function App() {
   };
   const conversationRef = useRef(new Conversation());
   const contextManagerRef = useRef(new ContextManager(config.defaultProvider));
+  // Keep latest submit handler for /retry without circular useCallback deps
+  const handleSubmitRef = useRef<(input: string) => Promise<void>>(async () => {});
+  // Last non-command user input (for /retry)
+  const lastUserInputRef = useRef<string | null>(null);
+  // Latest provider/model for CommandContext without stale closures
+  const currentProviderRef = useRef(currentProvider);
+  const currentModelRef = useRef(currentModel);
+  currentProviderRef.current = currentProvider;
+  currentModelRef.current = currentModel;
 
   // Buffer of in-flight assistant text (committed text not yet flushed)
   const streamBufferRef = useRef<string>("");
@@ -169,6 +182,13 @@ export function App() {
   const pushNotice = useCallback(
     (content: string) => {
       pushCompleted({ id: nextId(), role: "system-notice", content });
+    },
+    [pushCompleted]
+  );
+
+  const pushError = useCallback(
+    (content: string) => {
+      pushCompleted({ id: nextId(), role: "error", content });
     },
     [pushCompleted]
   );
@@ -322,121 +342,60 @@ export function App() {
     []
   );
 
-  // ─── Slash Commands ─────────────────────────────────────────────────────────
+  // ─── Slash Commands (single source of truth: src/commands) ─────────────────
 
   const handleSlashCommand = useCallback(
-    (input: string): boolean => {
-      if (!input.startsWith("/")) return false;
-      const parts = input.trim().split(" ");
-      const command = parts[0];
-      const args = parts.slice(1);
+    async (input: string): Promise<boolean> => {
+      if (!isSlashCommand(input)) return false;
 
       pushCompleted({ id: nextId(), role: "user", content: input });
 
-      switch (command) {
-                case "/help":
-          pushNotice(
-            [
-              "Commands:",
-              "  /help              Show this list",
-              "  /model [name]      Switch model or list all",
-              "  /clear             Clear conversation",
-              "  /exit              Quit",
-              "",
-              "Tips:",
-              "  @filename          Mention a file — adds it to context automatically",
-              "  Ctrl+C             Exit",
-            ].join("\n")
-          );
-          return true;
-
-        case "/clear":
+      const ctx: CommandContext = {
+        currentProvider: currentProviderRef.current,
+        currentModel: currentModelRef.current,
+        conversation: conversationRef.current,
+        contextManager: contextManagerRef.current,
+        setProvider: (p) => {
+          setCurrentProvider(p);
+          currentProviderRef.current = p;
+        },
+        setModel: (m) => {
+          setCurrentModel(m);
+          currentModelRef.current = m;
+        },
+        setTokenCount,
+        pushCompleted,
+        pushNotice,
+        pushError,
+        clearConversation: () => {
           conversationRef.current.clear();
-          contextManagerRef.current.clearFiles();
           setCompletedMessages([]);
-          setTokenCount(0);
-          pushNotice("Conversation and context cleared.");
-          return true;
+          lastUserInputRef.current = null;
+        },
+        getLastUserInput: () => {
+          if (lastUserInputRef.current) return lastUserInputRef.current;
+          const last = conversationRef.current.getLastUserMessage();
+          if (!last) return null;
+          return typeof last.content === "string" ? last.content : null;
+        },
+        triggerRetry: async (retryInput: string) => {
+          // handleRetry already removed the last assistant exchange.
+          // Drop the leftover user message so handleSubmit can re-add it cleanly.
+          const history = conversationRef.current.getHistory();
+          if (history.length > 0 && history[history.length - 1].role === "user") {
+            conversationRef.current.removeLastMessage();
+          }
+          await handleSubmitRef.current(retryInput);
+        },
+        exitApp: () => {
+          setTimeout(() => exit(), 200);
+        },
+      };
 
-        case "/add": {
-          const filePath = args[0];
-          if (!filePath) {
-            pushNotice("Usage: /add <path>");
-            return true;
-          }
-          const result = contextManagerRef.current.addFile(filePath, "command");
-          if (result.success) {
-            pushNotice(
-              `Added to context: ${filePath}\n` +
-              `  ${formatTokenCount(result.tokens ?? 0)} tokens, ${result.lines} lines`
-            );
-          } else {
-            pushCompleted({
-              id: nextId(),
-              role: "error",
-              content: `Failed to add file: ${result.error}`,
-            });
-          }
-          return true;
-        }
-
-        case "/remove": {
-          const filePath = args[0];
-          if (!filePath) {
-            pushNotice("Usage: /remove <path>");
-            return true;
-          }
-          const removed = contextManagerRef.current.removeFile(filePath);
-          if (removed) {
-            pushNotice(`Removed from context: ${filePath}`);
-          } else {
-            pushNotice(`File not in context: ${filePath}`);
-          }
-          return true;
-        }
-
-        case "/model": {
-          const modelArg = args[0];
-          if (!modelArg) {
-            const lines = [`Current: ${currentProvider} / ${currentModel}`, ""];
-            for (const [pName, models] of Object.entries(PROVIDER_MODELS)) {
-              lines.push(`[${pName}]`);
-              models.forEach((m) => {
-                const cur = pName === currentProvider && m === currentModel;
-                lines.push(`  ${cur ? "→ " : "  "}${m}`);
-              });
-              lines.push("");
-            }
-            pushNotice(lines.join("\n"));
-            return true;
-          }
-          const allModels = Object.entries(PROVIDER_MODELS).flatMap(
-            ([p, ms]) => ms.map((m) => ({ provider: p as ProviderName, model: m }))
-          );
-          const match = allModels.find((e) => e.model === modelArg);
-          if (match) {
-            setCurrentProvider(match.provider);
-            setCurrentModel(match.model);
-            contextManagerRef.current.setProvider(match.provider);
-            pushNotice(`Switched to ${match.model} (${match.provider})`);
-          } else {
-            setCurrentModel(modelArg);
-            pushNotice(`Switched to model: ${modelArg} on ${currentProvider}`);
-          }
-          return true;
-        }
-
-        case "/exit":
-          pushNotice("Goodbye.");
-          setTimeout(() => process.exit(0), 200);
-          return true;
-
-        default:
-          pushNotice(`Unknown command: ${command}. Type /help for list.`);
-          return true;
-      }
+      await dispatchCommand(input, ctx);
+      return true;
     },
-    [pushCompleted, pushNotice, currentModel, currentProvider]
+    [pushCompleted, pushNotice, pushError, exit]
   );
 
   // ─── Submit ────────────────────────────────────────────────────────────────
@@ -445,8 +404,9 @@ export function App() {
     async (userInput: string) => {
       const trimmed = userInput.trim();
       if (!trimmed || isLoading) return;
-      if (handleSlashCommand(trimmed)) return;
+      if (await handleSlashCommand(trimmed)) return;
 
+      lastUserInputRef.current = trimmed;
       pushCompleted({ id: nextId(), role: "user", content: trimmed });
 
       // ── Auto-add @mentioned files to context ─────────────────
@@ -564,9 +524,13 @@ export function App() {
               if (toolName === "run_command") {
                 stdout = r.stdout as string | undefined;
                 stderr = r.stderr as string | undefined;
+              } else if (toolName === "edit_file" || toolName === "apply_patch" || toolName === "write_file") {
+                stdout = r.preview as string | undefined;
               }
               resultSummary = getToolResultSummary(toolName, result);
             }
+
+            const hunks = r.hunks as import("diff").StructuredPatchHunk[] | undefined;
 
             if (toolName === "send_message" && "success" in r && r.success) {
               const uiMsg = r.ui_message as {
@@ -606,6 +570,7 @@ export function App() {
               resultSummary,
               stdout,
               stderr,
+              hunks,
             };
 
             pushCompleted({
@@ -716,6 +681,7 @@ export function App() {
       isLoading,
       handleSlashCommand,
       pushCompleted,
+      pushNotice,
       currentProvider,
       currentModel,
       requestPermission,
@@ -724,6 +690,9 @@ export function App() {
       scheduleLiveUpdate,
     ]
   );
+
+  // Keep ref current so /retry can call the latest submit handler
+  handleSubmitRef.current = handleSubmit;
 
   // ─── Question Handlers ─────────────────────────────────────────────────────
 

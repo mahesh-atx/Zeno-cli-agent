@@ -16,12 +16,23 @@ export function countTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/**
- * Counts tokens for a single message including role overhead.
- */
 export function countMessageTokens(message: Message): number {
+  let text = "";
+  if (typeof message.content === "string") {
+    text = message.content;
+  } else if (Array.isArray(message.content)) {
+    for (const part of message.content) {
+      if (part.type === "text") {
+        text += part.text;
+      } else if (part.type === "tool-call") {
+        text += JSON.stringify(part.args);
+      } else if (part.type === "tool-result") {
+        text += typeof part.result === "string" ? part.result : JSON.stringify(part.result);
+      }
+    }
+  }
   // ~4 tokens overhead per message for role + formatting
-  return countTokens(message.content) + 4;
+  return countTokens(text) + 4;
 }
 
 /**

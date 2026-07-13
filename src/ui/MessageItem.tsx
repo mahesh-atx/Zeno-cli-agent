@@ -62,7 +62,7 @@ function AssistantMessage({
       {(content || isStreaming) && (
         <Box flexDirection="row">
           <Box width={2} flexShrink={0}>
-            {!hideIcon && <Text color={Colors.AccentCyan} bold>✻ </Text>}
+            {!hideIcon && <Text color={Colors.AccentGreen}>● </Text>}
           </Box>
 
           <Box flexDirection="column">

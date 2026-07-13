@@ -49,8 +49,8 @@ const handleHelp: CommandHandler = (_args, ctx) => {
   const lines = [
     "Commands:",
     ...COMMANDS.map((c) => {
-      const usage = c.usage ? ` ${c.usage}` : "";
-      return `  ${c.name}${usage.padEnd(20 - c.name.length)}  ${c.description}`;
+      const label = c.usage ? `${c.name} ${c.usage}` : c.name;
+      return `  ${label.padEnd(22)}  ${c.description}`;
     }),
     "",
     "Tips:",
@@ -105,6 +105,7 @@ const handleModel: CommandHandler = (args, ctx) => {
 };
 
 const handleClear: CommandHandler = (_args, ctx) => {
+  console.clear();
   ctx.clearConversation();
   ctx.contextManager.clearFiles();
   ctx.setTokenCount(0);
@@ -274,23 +275,22 @@ export const COMMANDS: Array<CommandMeta & { handler: CommandHandler }> = [
   {
     name: "/add",
     description: "Add a file to context window",
-    usage: "/add <path>",
+    usage: "<path>",
     aliases: [],
     handler: handleAdd,
   },
   {
     name: "/remove",
     description: "Remove a file from context window",
-    usage: "/remove <path>",
+    usage: "<path>",
     aliases: [],
     handler: handleRemove,
   },
   {
     name: "/context",
     description: "Show context window summary",
-    usage: "/context",
-    aliases: [],
-    handler: handleFiles, // using existing handleFiles as placeholder handler
+    aliases: ["/files"],
+    handler: handleFiles,
   },
   {
     name: "/tokens",

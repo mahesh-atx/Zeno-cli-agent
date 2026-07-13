@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { askPermission } from "../core/permissions";
+import { getPatchFromContents } from "../utils/diff";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ export interface WriteFileOutput {
   path: string;
   bytesWritten: number;
   isNew: boolean;
+  preview?: string; // NEW: Diff preview for UI
+  hunks?: import("diff").StructuredPatchHunk[];
   hints?: string[]; // NEW: Post-write hints
 }
 
@@ -82,7 +85,7 @@ function buildDiffPreview(
   const oldLines = oldContent.split("\n");
   const delta = newLines.length - oldLines.length;
   
-  const preview = newLines.slice(0, 15).map((line) => `  ${line}`);
+  const preview = newLines.slice(0, 15).map((line) => `+ ${line}`);
   if (newLines.length > 15) {
     preview.push(`  ... (${newLines.length - 15} more lines)`);
   }
@@ -199,6 +202,12 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
       path: input.path,
       bytesWritten,
       isNew,
+      preview: details.join("\n"),
+      hunks: getPatchFromContents({
+        filePath: input.path,
+        oldContent: existingContent || "",
+        newContent: input.content,
+      }),
       hints: isNew ? [] : ["File overwritten successfully. Ensure you ran any necessary linters or tests."],
     };
   } catch (error) {

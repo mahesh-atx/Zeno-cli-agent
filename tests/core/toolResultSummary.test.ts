@@ -11,7 +11,7 @@ describe("getToolResultSummary — success cases", () => {
   it("write_file with valid result", () => {
     expect(
       getToolResultSummary("write_file", { success: true, path: "x.ts", bytesWritten: 100, isNew: true })
-    ).toBe("Created: x.ts");
+    ).toBe("Created");
   });
 
   it("edit_file with valid result", () => {

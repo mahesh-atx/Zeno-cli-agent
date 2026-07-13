@@ -213,7 +213,7 @@ describe("dispatchCommand /model", () => {
 
   it("switches provider when model belongs to different provider", async () => {
     const ctx = makeCtx({ currentProvider: "groq" });
-    await dispatchCommand("/model openai/gpt-4o-mini", ctx);
+    await dispatchCommand("/model poolside/laguna-m.1:free", ctx);
     expect(ctx.setProvider).toHaveBeenCalledWith("openrouter");
   });
 
@@ -227,7 +227,7 @@ describe("dispatchCommand /model", () => {
   it("calls contextManager.setProvider on known model switch", async () => {
     const ctx = makeCtx();
     const spy = vi.spyOn(ctx.contextManager, "setProvider");
-    await dispatchCommand("/model openai/gpt-4o-mini", ctx);
+    await dispatchCommand("/model poolside/laguna-m.1:free", ctx);
     expect(spy).toHaveBeenCalledWith("openrouter");
   });
 
