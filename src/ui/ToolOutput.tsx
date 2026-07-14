@@ -58,7 +58,7 @@ function useExpandable(isLast: boolean | undefined, initial = false) {
   
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e")) {
         setIsExpanded(prev => !prev);
       }
     },
@@ -66,69 +66,6 @@ function useExpandable(isLast: boolean | undefined, initial = false) {
   );
 
   return [isExpanded, setIsExpanded] as const;
-}
-
-// ─── Grouped Read Files ────────────────────────────────────────────────────────
-export function GroupedReadFilesOutput({ toolCalls, isLast }: { toolCalls: ToolCall[]; isLast?: boolean }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  useInput(
-    (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
-        setIsExpanded(p => !p);
-      }
-    },
-    { isActive: !!isLast }
-  );
-
-  const totalFiles = toolCalls.length;
-  const isRunning = toolCalls.some(tc => tc.status === "running");
-  const overallStatus = isRunning ? "running" : "success";
-
-  if (isRunning) {
-    const activeFiles = toolCalls.filter(tc => tc.status === "running").map(tc => String((tc.input as any).path || "file"));
-    return (
-      <Box flexDirection="column">
-        <Text><StatusIcon status="running" /><Text color="white" bold> Read {totalFiles} files</Text></Text>
-        <Text dimColor>   └  Reading {activeFiles.slice(0, 3).join(", ")}{activeFiles.length > 3 ? ` +${activeFiles.length - 3} more` : ""}...</Text>
-      </Box>
-    );
-  }
-
-  if (!isExpanded) {
-    const paths = toolCalls.map(tc => String((tc.input as any).path || "file").split("/").pop());
-    const fileList = paths.length > 3 ? `${paths.slice(0, 3).join(", ")} +${paths.length - 3} more` : paths.join(", ");
-    return (
-      <Box flexDirection="column">
-        <Text><StatusIcon status={overallStatus} /><Text color="white" bold> Read {totalFiles} files</Text></Text>
-        <Text><Text dimColor>   └  </Text><Text color="white">{fileList}</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
-      </Box>
-    );
-  }
-
-  return (
-    <Box flexDirection="column">
-      <Text><StatusIcon status={overallStatus} /><Text color="white" bold> Read {totalFiles} files</Text><Text dimColor> ({totalFiles} requested)</Text></Text>
-      {toolCalls.map((tc, idx) => {
-        const isLastFile = idx === toolCalls.length - 1;
-        const icon = tc.status === "success" ? "✓" : "✗";
-        const color = tc.status === "success" ? Colors.AccentGreen : Colors.AccentRed;
-        const pathArg = (tc.input as any).path || "file";
-        const raw = tc.rawResult as any;
-        const lines = raw?.lines;
-        return (
-          <Text key={tc.id}>
-            <Text dimColor>   {isLastFile ? "└  " : "├  "}</Text>
-            <Text color={color}>{icon} </Text>
-            <Text color="white">{pathArg}</Text>
-            {tc.status === "success" && lines !== undefined && <Text dimColor> ({lines} lines)</Text>}
-            {tc.status !== "success" && tc.resultSummary && <Text color={Colors.AccentRed}> — {tc.resultSummary.slice(0, 60)}</Text>}
-          </Text>
-        );
-      })}
-      {isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
-    </Box>
-  );
 }
 
 // ─── Read Many Files ──────────────────────────────────────────────────────────
@@ -162,7 +99,7 @@ function ReadManyFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?
       <Box flexDirection="column">
         <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read {successCount || totalFiles} files</Text></Text>
         <Text><Text dimColor>   └  </Text><Text color="white">{fileList}</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -176,7 +113,7 @@ function ReadManyFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?
         const color = file.success ? Colors.AccentGreen : Colors.AccentRed;
         return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color={color}>{icon} </Text><Text color="white">{file.path}</Text>{file.success && file.lines !== undefined && <Text dimColor> ({file.lines} lines{file.tokens ? `, ~${file.tokens}` : ""})</Text>}{!file.success && file.error && <Text color={Colors.AccentRed}> — {file.error.slice(0, 60)}</Text>}</Text>;
       })}
-      {isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -192,7 +129,7 @@ function ListFilesInner({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e")) {
         if (isLast) setIsExpanded(p => !p);
       }
     },
@@ -208,17 +145,13 @@ function ListFilesInner({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   }
 
   if (!isExpanded) {
+    const collapsed = entries.slice(0, 5).map(e => e.replace(/^\[.*?\]\s+/, "").split(" ")[0]);
+    const remaining = entries.length - 5;
     return (
       <Box flexDirection="column">
         <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pathArg})</Text>{entries.length > 0 && <Text color="white"> — {entries.length} items</Text>}</Text>
-        {entries.slice(0, 3).map((e, idx) => {
-          const isLastItem = (idx === entries.length - 1) && (entries.length <= 3);
-          const isLastShown = idx === 2 && entries.length <= 3;
-          const treeChar = (isLastItem || isLastShown) ? "└  " : "├  ";
-          return <Text key={idx}><Text dimColor>   {treeChar}</Text><Text color="white">{e}</Text></Text>
-        })}
-        {entries.length > 3 && <Text><Text dimColor>   └  </Text><Text dimColor>... {entries.length - 3} more items</Text></Text>}
-        {entries.length > 3 && isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        {entries.length > 0 && <Text><Text dimColor>   └  </Text><Text color="white">{collapsed.join(", ")}{remaining > 0 ? ` +${remaining} more` : ""}</Text></Text>}
+        {entries.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
       </Box>
     );
   }
@@ -230,7 +163,7 @@ function ListFilesInner({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
         const isLastFile = idx === entries.length - 1;
         return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{e}</Text></Text>;
       })}
-      {isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -240,7 +173,7 @@ function GlobFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -262,7 +195,7 @@ function GlobFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
       <Box flexDirection="column">
         <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Search ({pattern})</Text><Text color="white"> — {total ?? files.length} matches</Text></Text>
         <Text><Text dimColor>   └  </Text><Text color="white">{first} +{files.length - 3} more</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -274,7 +207,7 @@ function GlobFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
         const isLastFile = idx === files.length - 1;
         return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{f}</Text></Text>;
       }) : files.length > 0 && files.length <= 5 && <Text><Text dimColor>   └  </Text><Text color="white">{files.map(f => f.split("/").pop()).join(", ")}</Text></Text>}
-      {isExpanded && isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
+      {isExpanded && <Text dimColor>      (ctrl+r to collapse)</Text>}
     </Box>
   );
 }
@@ -284,7 +217,7 @@ function SearchFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: 
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -306,7 +239,7 @@ function SearchFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: 
       <Box flexDirection="column">
         <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Grep "{query}"</Text><Text color="white"> — {total ?? matches.length} matches</Text></Text>
         <Text><Text dimColor>   └  </Text><Text color="white">{preview} +{matches.length - 2} more</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -318,7 +251,7 @@ function SearchFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: 
         const isLastFile = idx === arr.length - 1;
         return <Text key={idx}><Text dimColor>   {isLastFile ? "└  " : "├  "}</Text><Text color="white">{m.file}:{m.line}</Text><Text dimColor> — {m.content.slice(0, 50)}</Text></Text>;
       })}
-      {isExpanded ? (isLast ? <Text dimColor>      (ctrl+r to collapse)</Text> : null) : matches.length > 5 && isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+      {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : matches.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
     </Box>
   );
 }
@@ -328,7 +261,7 @@ function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -349,12 +282,9 @@ function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   if (!isExpanded) {
     return (
       <Box flexDirection="column">
-        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text><Text color="white"> — {lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Text>
-        {content && content.split("\n").slice(0, 2).map((line, idx) => (
-          <Text key={idx}><Text dimColor>   ├  </Text><Text color="white">{line.slice(0, 100)}</Text></Text>
-        ))}
-        {content && content.split("\n").length > 2 && <Text><Text dimColor>   └  </Text><Text dimColor>...</Text></Text>}
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Read ({pathArg})</Text></Text>
+        <Text><Text dimColor>   └  </Text><Text color="white">{lines ?? totalLines ?? "?"} lines{size ? `, ${(size/1024).toFixed(1)} KB` : ""}</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -365,8 +295,8 @@ function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
       {content && content.split("\n").slice(0, 15).map((line, idx, arr) => (
         <Text key={idx}><Text dimColor>   {idx === arr.length - 1 || idx === 14 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Text>
       ))}
-      {content && content.split("\n").length > 15 && <Text><Text dimColor>   └  </Text><Text dimColor>... {content.split("\n").length - 15} more lines</Text></Text>}
-      {isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
+      {content && content.split("\n").length > 15 && <Text dimColor>      ... {content.split("\n").length - 15} more lines</Text>}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -388,8 +318,8 @@ function GitStatusOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
   return (
     <Box flexDirection="column">
       <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git status{branch ? ` (${branch})` : ""}</Text>{isClean !== undefined && <Text color={isClean ? Colors.AccentGreen : Colors.AccentYellow}> {isClean ? "clean" : "dirty"}</Text>}</Text>
-      {isClean === false && !isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 3).join(", ").slice(0, 80)}...</Text></Text>{isLast && <Text dimColor>      (ctrl+r to expand)</Text>}</>}
-      {isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 20).join("\n   ")}</Text></Text>{isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}</>}
+      {isClean === false && !isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 3).join(", ").slice(0, 80)}...</Text></Text><Text dimColor>      (ctrl+r to expand)</Text></>}
+      {isExpanded && output && <><Text><Text dimColor>   └  </Text><Text color="white">{output.split("\n").slice(0, 20).join("\n   ")}</Text></Text><Text dimColor>      (ctrl+r to collapse)</Text></>}
       {!isExpanded && isClean && <Text><Text dimColor>   └  </Text><Text color="white">clean working tree</Text></Text>}
     </Box>
   );
@@ -412,7 +342,7 @@ function GitDiffOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bool
       <Box flexDirection="column">
         <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Git diff</Text></Text>
         <Text><Text dimColor>   └  </Text><Text color="white">{preview}...</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -423,7 +353,7 @@ function GitDiffOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bool
       {(diff ? diff.split("\n").slice(0, 30) : []).map((line: string, idx: number) => (
         <Text key={idx}><Text dimColor>   {idx === 29 ? "└  " : "├  "}</Text><Text color={line.startsWith("+") ? Colors.AccentGreen : line.startsWith("-") ? Colors.AccentRed : "white"}>{line.slice(0, 100)}</Text></Text>
       ))}
-      {isLast && <Text dimColor>      (ctrl+r to collapse)</Text>}
+      <Text dimColor>      (ctrl+r to collapse)</Text>
     </Box>
   );
 }
@@ -447,7 +377,7 @@ function GitLogOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boole
           <Text key={idx}><Text dimColor>   ├  </Text><Text color="white">{line.slice(0, 80)}</Text></Text>
         ))}
         <Text><Text dimColor>   └  </Text><Text color="white">+{lines.length - 3} more</Text></Text>
-        {isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+        <Text dimColor>      (ctrl+r to expand)</Text>
       </Box>
     );
   }
@@ -458,10 +388,66 @@ function GitLogOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boole
       {(isExpanded ? lines : lines.slice(0, 5)).map((line: string, idx: number, arr: string[]) => (
         <Text key={idx}><Text dimColor>   {idx === arr.length - 1 ? "└  " : "├  "}</Text><Text color="white">{line.slice(0, 100)}</Text></Text>
       ))}
-      {isExpanded ? (isLast ? <Text dimColor>      (ctrl+r to collapse)</Text> : null) : lines.length > 5 && isLast && <Text dimColor>      (ctrl+r to expand)</Text>}
+      {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : lines.length > 5 && <Text dimColor>      (ctrl+r to expand)</Text>}
     </Box>
   );
 }
+
+
+function RunCommandOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
+  const [isExpanded, setIsExpanded] = React.useState(toolCall.isExpanded || false);
+  useInput(
+    (input: string, key: any) => {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
+        setIsExpanded((p: boolean) => !p);
+      }
+    },
+    { isActive: !!isLast }
+  );
+
+  const command = (toolCall.input as any).command || "command";
+  const exitCode = (toolCall.rawResult as any)?.exitCode;
+  const stdout = toolCall.stdout || (toolCall.rawResult as any)?.stdout || "";
+  const stderr = toolCall.stderr || (toolCall.rawResult as any)?.stderr || "";
+  const combined = (stdout + "\n" + stderr).trim();
+  const lines = combined ? combined.split("\n").filter((l: string) => l.trim().length > 0) : [];
+
+  if (toolCall.status === "running") {
+    return (
+      <Box flexDirection="column">
+        <Text><StatusIcon status="running" /><Text color="white" bold> Run ({String(command).slice(0, 40)})</Text></Text>
+      </Box>
+    );
+  }
+
+  const summary = toolCall.resultSummary || (exitCode !== undefined ? `exit ${exitCode}` : "done");
+
+  if (!isExpanded && lines.length > 8) {
+    return (
+      <Box flexDirection="column">
+        <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Run ({String(command).slice(0, 30)}...)</Text><Text color="white"> — {summary}</Text></Text>
+        {lines.slice(0, 4).map((line: string, i: number) => (
+          <Text key={i}><Text dimColor>   ├  </Text><Text color="white">{line.slice(0, 80)}</Text></Text>
+        ))}
+        <Text><Text dimColor>   └  </Text><Text dimColor>... {lines.length - 4} more lines</Text></Text>
+        <Text dimColor>      (ctrl+r to expand)</Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text><StatusIcon status={toolCall.status} /><Text color="white" bold> Run ({String(command).slice(0, 50)})</Text><Text color="white"> — {summary}</Text></Text>
+      {(isExpanded ? lines : lines.slice(0, 12)).map((line: string, idx: number, arr: string[]) => {
+        const isLastLine = idx === arr.length - 1;
+        const isError = line.toLowerCase().includes("error") || line.toLowerCase().includes("fail");
+        return <Text key={idx}><Text dimColor>   {isLastLine ? "└  " : "├  "}</Text><Text color={isError ? Colors.AccentRed : "white"}>{line.slice(0, 120)}</Text></Text>;
+      })}
+      {isExpanded ? <Text dimColor>      (ctrl+r to collapse)</Text> : lines.length > 12 && <Text dimColor>      (ctrl+r to expand, {lines.length} lines total)</Text>}
+    </Box>
+  );
+}
+
 
 export function ToolOutput({ toolCall, isLast }: ToolOutputProps) {
   const { toolName, input, status, resultSummary, stdout, stderr } = toolCall;
@@ -474,6 +460,7 @@ export function ToolOutput({ toolCall, isLast }: ToolOutputProps) {
   if (toolName === "git_status") return <GitStatusOutput toolCall={toolCall} isLast={isLast} />;
   if (toolName === "git_diff") return <GitDiffOutput toolCall={toolCall} isLast={isLast} />;
   if (toolName === "git_log") return <GitLogOutput toolCall={toolCall} isLast={isLast} />;
+  if (toolName === "run_command") return <RunCommandOutput toolCall={toolCall} isLast={isLast} />;
 
   const inputSummary = formatInput(input);
   const formattedName = toolName.charAt(0).toUpperCase() + toolName.slice(1);
