@@ -5,7 +5,7 @@ export default defineConfig({
     environment: "node",
     // We define a 30s timeout here globally because our live agent tests hit the real LLM APIs
     testTimeout: 30000,
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     clearMocks: true,
     passWithNoTests: true,
     fileParallelism: false,

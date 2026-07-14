@@ -718,7 +718,7 @@ export function App() {
   // Input handlers: Ctrl+C exit, R retry (expand now handled inside ToolOutput via its own useInput)
   useInput(
     (input, key) => {
-      if (key.ctrl && input.toLowerCase() === "c") {
+      if (key.ctrl && input?.toLowerCase() === "c") {
         process.exit(0);
         return;
       }
@@ -738,9 +738,10 @@ export function App() {
   const staticItems = useMemo(
     () => {
       if (completedMessages.length === 0) return [];
+      const messagesToMakeStatic = completedMessages.slice(0, -1);
       return [
         { kind: "welcome" as const },
-        ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
+        ...messagesToMakeStatic.map((msg) => ({ kind: "message" as const, msg })),
       ];
     },
     [completedMessages]
@@ -764,8 +765,7 @@ export function App() {
               />
             );
           }
-          const isLastMsg = item.msg.id === completedMessages[completedMessages.length - 1]?.id;
-          return <MessageItem key={item.msg.id} message={item.msg} isLast={isLastMsg} />;
+          return <MessageItem key={item.msg.id} message={item.msg} isLast={false} />;
         }}
       </Static>
 
@@ -774,6 +774,14 @@ export function App() {
           <WelcomeBanner
             provider={currentProvider}
             model={currentModel}
+          />
+        )}
+
+        {completedMessages.length > 0 && (
+          <MessageItem
+            key={completedMessages[completedMessages.length - 1].id}
+            message={completedMessages[completedMessages.length - 1]}
+            isLast={true}
           />
         )}
 
