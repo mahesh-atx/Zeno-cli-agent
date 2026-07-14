@@ -304,7 +304,7 @@ function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
 // ─── Git Status ─────────────────────────────────────────────────────────────
 function GitStatusOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
-  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+  useInput((input, key) => { if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
 
   const raw = toolCall.rawResult as any;
   const isClean = raw?.isClean;
@@ -327,7 +327,7 @@ function GitStatusOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
 
 function GitDiffOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
-  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+  useInput((input, key) => { if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
 
   const raw = toolCall.rawResult as any;
   const diff = raw?.diff as string | undefined;
@@ -360,7 +360,7 @@ function GitDiffOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bool
 
 function GitLogOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
-  useInput((input, key) => { if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
+  useInput((input, key) => { if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) setIsExpanded(p => !p); }, { isActive: !!isLast });
 
   const raw = toolCall.rawResult as any;
   const log = raw?.log as string | undefined;
