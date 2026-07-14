@@ -23,10 +23,14 @@ function unescapeFromDiff(s: string): string {
 }
 
 /**
- * Replaces leading tabs with spaces to ensure predictable alignment in UI
+ * Replaces leading tabs with spaces to ensure predictable alignment in UI.
+ * Uses 4 spaces per tab (common default), configurable via env TAB_WIDTH.
  */
-export function convertLeadingTabsToSpaces(content: string): string {
-  return content.replace(/^[ \t]+/gm, (match) => match.replace(/\t/g, '  '));
+export function convertLeadingTabsToSpaces(content: string, tabWidth = 4): string {
+  const envWidth = parseInt(process.env.TAB_WIDTH || "", 10);
+  const spaces = Number.isFinite(envWidth) && envWidth > 0 && envWidth <= 8 ? envWidth : tabWidth;
+  const replacement = " ".repeat(spaces);
+  return content.replace(/^[ \t]+/gm, (match) => match.replace(/\t/g, replacement));
 }
 
 /**

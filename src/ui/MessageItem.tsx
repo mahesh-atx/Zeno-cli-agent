@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { ToolOutput } from "./ToolOutput";
+import { ToolOutput, GroupedReadFilesOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
 import { renderMarkdown, renderStreaming } from "../utils/render";
@@ -19,6 +19,7 @@ export interface ChatMessage {
 
 interface MessageItemProps {
   message: ChatMessage;
+  isLast?: boolean;
 }
 
 function UserMessage({ content }: { content: string }) {
@@ -37,11 +38,13 @@ function AssistantMessage({
   isStreaming,
   toolCalls,
   hideIcon,
+  isLast,
 }: {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
   hideIcon?: boolean;
+  isLast?: boolean;
 }) {
   const rendered = isStreaming
     ? renderStreaming(content)
@@ -53,9 +56,17 @@ function AssistantMessage({
     <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
       {toolCalls && toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
-          {toolCalls.map((tc) => (
-            <ToolOutput key={tc.id} toolCall={tc} />
-          ))}
+          {toolCalls.length > 1 && toolCalls.every(tc => tc.toolName === "read_file") ? (
+            <Box marginBottom={1} marginLeft={2}>
+              <GroupedReadFilesOutput toolCalls={toolCalls} isLast={isLast} />
+            </Box>
+          ) : (
+            toolCalls.map((tc) => (
+              <Box key={tc.id} marginBottom={1} marginLeft={2}>
+                <ToolOutput toolCall={tc} isLast={isLast} />
+              </Box>
+            ))
+          )}
         </Box>
       )}
 
@@ -102,7 +113,7 @@ function SystemNotice({ content }: { content: string }) {
   );
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, isLast }: MessageItemProps) {
   switch (message.role) {
     case "user":
       return <UserMessage content={message.content} />;
@@ -113,6 +124,7 @@ export function MessageItem({ message }: MessageItemProps) {
           isStreaming={message.isStreaming}
           toolCalls={message.toolCalls}
           hideIcon={message.hideIcon}
+          isLast={isLast}
         />
       );
     case "error":

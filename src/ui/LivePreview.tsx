@@ -33,7 +33,7 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
   if (activeTool) {
     return (
       <Box marginTop={hideIcon ? 0 : 1} flexDirection="column">
-        <ToolOutput toolCall={activeTool} />
+        <ToolOutput toolCall={activeTool} isLast={true} />
       </Box>
     );
   }

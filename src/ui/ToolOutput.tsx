@@ -58,7 +58,7 @@ function useExpandable(isLast: boolean | undefined, initial = false) {
   
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e")) {
         setIsExpanded(prev => !prev);
       }
     },
@@ -129,7 +129,7 @@ function ListFilesInner({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e")) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e")) {
         if (isLast) setIsExpanded(p => !p);
       }
     },
@@ -173,7 +173,7 @@ function GlobFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: bo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -217,7 +217,7 @@ function SearchFilesOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: 
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -261,7 +261,7 @@ function ReadFileOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boo
   const [isExpanded, setIsExpanded] = useState(toolCall.isExpanded || false);
   useInput(
     (input, key) => {
-      if (key.ctrl && (input.toLowerCase() === "r" || input.toLowerCase() === "e") && isLast) {
+      if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {
         setIsExpanded(p => !p);
       }
     },
@@ -396,7 +396,6 @@ function GitLogOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boole
 
 function RunCommandOutput({ toolCall, isLast }: { toolCall: ToolCall; isLast?: boolean }) {
   const [isExpanded, setIsExpanded] = React.useState(toolCall.isExpanded || false);
-  const { useInput } = require("ink");
   useInput(
     (input: string, key: any) => {
       if (key.ctrl && (input?.toLowerCase() === "r" || input?.toLowerCase() === "e") && isLast) {

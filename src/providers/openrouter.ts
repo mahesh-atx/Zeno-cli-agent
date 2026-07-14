@@ -1,30 +1,27 @@
-// src/providers/openrouter.ts
-import { createOpenAI } from "@ai-sdk/openai";
+// src/providers/openrouter.ts — delegates to registry, keeps StreamResult type
 import { streamText } from "ai";
 import type { Message } from "../core/conversation";
 import type { Config } from "../core/config";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-
-// ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+import { providerRegistry, OPENROUTER_MODELS as REGISTRY_MODELS, OPENROUTER_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
 export interface StreamResult {
   stream: AsyncIterable<string>;
 }
 
-// ━━━ OpenRouter Client ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export const OPENROUTER_MODELS = REGISTRY_MODELS;
+export const OPENROUTER_DEFAULT_MODEL = REGISTRY_DEFAULT;
 
-/**
- * Returns a StreamResult on success.
- * On failure, returns a typed AgentEvent — never throws to console.
- */
 export async function chatWithOpenRouter(
   messages: Message[],
   model: string,
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  if (!config.openrouterApiKey) {
+  const def = providerRegistry.openrouter;
+  const apiKey = def.getApiKey(config);
+  if (!apiKey) {
     return {
       kind: "auth_error",
       message: "OPENROUTER_API_KEY is not set. Add it to your .env file.",
@@ -36,28 +33,19 @@ export async function chatWithOpenRouter(
     };
   }
 
-  const openrouter = createOpenAI({
-    apiKey: config.openrouterApiKey,
-    baseURL: "https://openrouter.ai/api/v1",
-    headers: {
-      "HTTP-Referer": "https://github.com/cli-agent",
-      "X-Title": "CLI Agent",
-    },
-  });
-
   const formattedMessages = messages.map((msg) => ({
     role: msg.role as "system" | "user" | "assistant",
     content: msg.content,
   }));
 
   try {
+    const modelInstance = def.createModel(apiKey, model);
     const result = streamText({
-      model: openrouter(model),
-      messages: formattedMessages,
+      model: modelInstance,
+      messages: formattedMessages as any,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
     });
-
     return { stream: result.textStream };
   } catch (error) {
     return translateProviderError("openrouter", error, attempt);

@@ -2,26 +2,21 @@ import * as fs from "fs";
 import * as path from "path";
 import ignore from "ignore";
 import Fuse from "fuse.js";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import fg from "fast-glob";
 
 export interface FileEntry {
-  path: string;        // relative path from cwd, e.g. "src/ui/App.tsx"
-  name: string;        // basename, e.g. "App.tsx"
-  dir: string;         // directory, e.g. "src/ui"
+  path: string;
+  name: string;
+  dir: string;
 }
-
-// ─── Cache ────────────────────────────────────────────────────────────────────
-// File listing can be slow on big repos, so cache it and refresh periodically.
 
 let fileCache: FileEntry[] | null = null;
 let fileCacheTime = 0;
 let fuseCache: Fuse<FileEntry> | null = null;
 
-const CACHE_TTL_MS = 5000; // refresh every 5 seconds
-const MAX_FILES = 5000;    // safety cap for huge repos
+const CACHE_TTL_MS = 5000;
+const MAX_FILES = 5000;
 
-// Always-ignored patterns (in addition to .gitignore)
 const ALWAYS_IGNORE = [
   "node_modules",
   ".git",
@@ -37,100 +32,80 @@ const ALWAYS_IGNORE = [
   ".DS_Store",
 ];
 
-// ─── Walk the FS ──────────────────────────────────────────────────────────────
-
-function loadGitignore(root: string) {
+function loadGitignore(root: string): { ig: ReturnType<typeof ignore>; patterns: string[] } {
   const ig = ignore().add(ALWAYS_IGNORE);
+  const patterns: string[] = ALWAYS_IGNORE.map(p => `**/${p}/**`).concat(ALWAYS_IGNORE);
 
   const gitignorePath = path.join(root, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     try {
       const content = fs.readFileSync(gitignorePath, "utf-8");
       ig.add(content);
+      // Convert gitignore lines to fast-glob ignore patterns
+      const lines = content.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+      for (const line of lines) {
+        // If pattern has no slash, it should match any depth
+        if (!line.includes("/")) {
+          patterns.push(`**/${line}`);
+          patterns.push(`**/${line}/**`);
+        } else {
+          patterns.push(line);
+          if (!line.endsWith("/**")) {
+            patterns.push(`${line}/**`);
+          }
+        }
+      }
     } catch {
-      // ignore read errors
+      // ignore
     }
   }
 
-  return ig;
+  return { ig, patterns };
 }
 
-function walkDirectory(
-  root: string,
-  ig: ReturnType<typeof ignore>,
-  collected: FileEntry[],
-  limit: number
-): void {
-  if (collected.length >= limit) return;
-
-  const stack: string[] = [root];
-
-  while (stack.length > 0 && collected.length < limit) {
-    const current = stack.pop()!;
-
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (collected.length >= limit) break;
-
-      const fullPath = path.join(current, entry.name);
-      const relPath = path.relative(root, fullPath);
-
-      // Skip empty / non-relative paths
-      if (!relPath || relPath.startsWith("..")) continue;
-
-      // Check .gitignore
-      // ignore lib expects forward slashes
-      const normalized = relPath.split(path.sep).join("/");
-      const checkPath = entry.isDirectory() ? `${normalized}/` : normalized;
-
-      try {
-        if (ig.ignores(checkPath)) continue;
-      } catch {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-      } else if (entry.isFile()) {
-        collected.push({
-          path: normalized,
-          name: entry.name,
-          dir: path.dirname(normalized),
-        });
-      }
-    }
-  }
+function buildFileEntriesFromPaths(paths: string[]): FileEntry[] {
+  return paths.map(p => {
+    const normalized = p.split(path.sep).join("/");
+    return {
+      path: normalized,
+      name: path.basename(normalized),
+      dir: path.dirname(normalized),
+    };
+  });
 }
-
-// ─── Public API ───────────────────────────────────────────────────────────────
 
 export function getFileList(forceRefresh = false): FileEntry[] {
   const now = Date.now();
-  if (
-    !forceRefresh &&
-    fileCache &&
-    now - fileCacheTime < CACHE_TTL_MS
-  ) {
+  if (!forceRefresh && fileCache && now - fileCacheTime < CACHE_TTL_MS) {
     return fileCache;
   }
 
   const root = process.cwd();
-  const ig = loadGitignore(root);
-  const files: FileEntry[] = [];
+  const { patterns } = loadGitignore(root);
+
+  let files: FileEntry[] = [];
 
   try {
-    walkDirectory(root, ig, files, MAX_FILES);
+    // fast-glob sync is much faster than manual readdirSync walk (avoids per-dir stat)
+    // Use cwd: root, onlyFiles: true, followSymbolicLinks: false, suppressErrors
+    const matched = fg.sync("**/*", {
+      cwd: root,
+      ignore: patterns,
+      onlyFiles: true,
+      dot: false,
+      followSymbolicLinks: false,
+      suppressErrors: true,
+      deep: 10, // max depth to avoid infinite in crazy repos
+    });
+
+    // Cap to MAX_FILES
+    const sliced = matched.slice(0, MAX_FILES);
+    files = buildFileEntriesFromPaths(sliced);
   } catch {
-    // best effort — return whatever we got
+    // Fallback to old walk if fast-glob fails
+    files = [];
   }
 
-  // Sort: shorter paths first, then alphabetic
   files.sort((a, b) => {
     if (a.path.length !== b.path.length) return a.path.length - b.path.length;
     return a.path.localeCompare(b.path);
@@ -139,7 +114,6 @@ export function getFileList(forceRefresh = false): FileEntry[] {
   fileCache = files;
   fileCacheTime = now;
 
-  // Rebuild fuse index when cache refreshes
   fuseCache = new Fuse(files, {
     keys: [
       { name: "name", weight: 0.6 },
@@ -153,10 +127,6 @@ export function getFileList(forceRefresh = false): FileEntry[] {
   return files;
 }
 
-/**
- * Search files using fuzzy matching.
- * If query is empty, returns the first `limit` files (recently/shallow first).
- */
 export function searchFiles(query: string, limit = 8): FileEntry[] {
   const files = getFileList();
 
@@ -165,7 +135,6 @@ export function searchFiles(query: string, limit = 8): FileEntry[] {
   }
 
   if (!fuseCache) {
-    // Shouldn't happen — getFileList builds it, but defensive
     fuseCache = new Fuse(files, {
       keys: [
         { name: "name", weight: 0.6 },
@@ -179,4 +148,11 @@ export function searchFiles(query: string, limit = 8): FileEntry[] {
 
   const results = fuseCache.search(query, { limit });
   return results.map((r) => r.item);
+}
+
+// For testing / cache invalidation
+export function clearFileCache(): void {
+  fileCache = null;
+  fuseCache = null;
+  fileCacheTime = 0;
 }

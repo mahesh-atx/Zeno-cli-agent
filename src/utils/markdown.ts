@@ -302,7 +302,14 @@ export function formatToken(
               .map((t) => formatToken(t, listDepth, orderedListNumber, token, highlight))
               .join("")
           : token.text;
-        return `${bullet} ${inner}${EOL}`;
+        
+        const bulletPrefixLen = stripAnsi(bulletStr).length + 1;
+        const innerLines = inner.split("\n");
+        const paddedInner = innerLines
+          .map((line: string, i: number) => (i === 0 ? line : " ".repeat(bulletPrefixLen) + line))
+          .join("\n");
+
+        return `${bullet} ${paddedInner}${EOL}`;
       }
       return token.text;
     }
