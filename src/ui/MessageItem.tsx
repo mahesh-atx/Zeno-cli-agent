@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { ToolOutput } from "./ToolOutput";
+import { ToolOutput, GroupedReadFilesOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
 import { renderMarkdown, renderStreaming } from "../utils/render";
@@ -56,9 +56,17 @@ function AssistantMessage({
     <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
       {toolCalls && toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
-          {toolCalls.map((tc) => (
-            <ToolOutput key={tc.id} toolCall={tc} isLast={isLast} />
-          ))}
+          {toolCalls.length > 1 && toolCalls.every(tc => tc.toolName === "read_file") ? (
+            <Box marginBottom={1} marginLeft={2}>
+              <GroupedReadFilesOutput toolCalls={toolCalls} isLast={isLast} />
+            </Box>
+          ) : (
+            toolCalls.map((tc) => (
+              <Box key={tc.id} marginBottom={1} marginLeft={2}>
+                <ToolOutput toolCall={tc} isLast={isLast} />
+              </Box>
+            ))
+          )}
         </Box>
       )}
 

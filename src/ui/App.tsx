@@ -197,7 +197,29 @@ export function App() {
   const isFirstChunkRef = useRef<boolean>(true);
 
   const pushCompleted = useCallback((msg: ChatMessage) => {
-    setCompletedMessages((prev) => [...prev, msg]);
+    setCompletedMessages((prev) => {
+      if (
+        msg.role === "assistant" &&
+        !msg.content &&
+        msg.toolCalls &&
+        msg.toolCalls.every(tc => tc.toolName === "read_file")
+      ) {
+        const last = prev.length > 0 ? prev[prev.length - 1] : null;
+        if (
+          last &&
+          last.role === "assistant" &&
+          !last.content &&
+          last.toolCalls &&
+          last.toolCalls.every(tc => tc.toolName === "read_file")
+        ) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, toolCalls: [...last.toolCalls, ...msg.toolCalls] }
+          ];
+        }
+      }
+      return [...prev, msg];
+    });
   }, []);
 
   const pushNotice = useCallback(
