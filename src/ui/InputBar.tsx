@@ -111,6 +111,9 @@ export function InputBar({
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [draftValue, setDraftValue] = useState("");
 
   // ── Decide which menu (if any) to show ──
   const commandMenuVisible =
@@ -187,6 +190,16 @@ export function InputBar({
     }
     
     // Submit normally for other commands
+    setHistory(prev => {
+      const next = [...prev];
+      if (next[next.length - 1] !== command) {
+        next.push(command);
+        if (next.length > 100) next.shift();
+      }
+      return next;
+    });
+    setHistoryIndex(-1);
+    setDraftValue("");
     onSubmit(command);
     setValue("");
   };
@@ -388,6 +401,39 @@ export function InputBar({
         // Fall through to regular typing so the user can refine the query
       }
 
+      // ── History navigation (when no menu visible) ──
+      const noMenuVisible = !commandMenuVisible && !fileMenuVisible && !showProviderPicker && !showModelPicker && !showThemePicker && !showStatusMenu;
+      if (noMenuVisible) {
+        if (key.upArrow) {
+          if (history.length > 0) {
+            if (historyIndex === -1) {
+              setDraftValue(value);
+              const lastIdx = history.length - 1;
+              setHistoryIndex(lastIdx);
+              setValue(history[lastIdx]);
+            } else if (historyIndex > 0) {
+              const newIdx = historyIndex - 1;
+              setHistoryIndex(newIdx);
+              setValue(history[newIdx]);
+            }
+          }
+          return;
+        }
+        if (key.downArrow) {
+          if (historyIndex !== -1) {
+            if (historyIndex < history.length - 1) {
+              const newIdx = historyIndex + 1;
+              setHistoryIndex(newIdx);
+              setValue(history[newIdx]);
+            } else {
+              setHistoryIndex(-1);
+              setValue(draftValue);
+            }
+          }
+          return;
+        }
+      }
+
       // ── Regular input ──
       if (key.return) {
         if (key.meta) {
@@ -425,6 +471,16 @@ export function InputBar({
         }
         
         if (trimmed) {
+          setHistory(prev => {
+            const next = [...prev];
+            if (next[next.length - 1] !== trimmed) {
+              next.push(trimmed);
+              if (next.length > 100) next.shift();
+            }
+            return next;
+          });
+          setHistoryIndex(-1);
+          setDraftValue("");
           onSubmit(trimmed);
           setValue("");
           setMenuClosed(false);
@@ -439,6 +495,8 @@ export function InputBar({
 
       if (key.ctrl && input === "u") {
         setValue("");
+        setHistoryIndex(-1);
+        setDraftValue("");
         return;
       }
 
@@ -448,6 +506,9 @@ export function InputBar({
       }
 
       if (input && !key.ctrl && !key.meta) {
+        if (historyIndex !== -1) {
+          setHistoryIndex(-1);
+        }
         setValue((prev) => prev + input);
       }
     },
