@@ -1,11 +1,8 @@
-// src/tools/readFile.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { readFile } from "../../src/tools/readFile";
-
-// ━━━ Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 let tmpDir: string;
 
@@ -22,8 +19,6 @@ function writeTmp(name: string, content: string): string {
   fs.writeFileSync(p, content, "utf-8");
   return path.relative(process.cwd(), p);
 }
-
-// ━━━ readFile ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("readFile tool", () => {
   it("reads an entire file successfully", async () => {
@@ -46,7 +41,8 @@ describe("readFile tool", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.content).toBe("line3\nline4");
-      expect(result.lines).toBe(4); // total lines of original file
+      expect(result.lines).toBe(2);
+      expect(result.totalLines).toBe(4);
     }
   });
 
@@ -57,6 +53,7 @@ describe("readFile tool", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.content).toBe("line1\nline2");
+      expect(result.lines).toBe(2);
     }
   });
 
@@ -67,6 +64,7 @@ describe("readFile tool", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.content).toBe("line2\nline3");
+      expect(result.lines).toBe(2);
     }
   });
 
@@ -91,5 +89,22 @@ describe("readFile tool", () => {
     if (!result.success) {
       expect(result.error).toContain("directory, not a file");
     }
+  });
+
+  it("blocks binary files", async () => {
+    const p = path.join(tmpDir, "binary.bin");
+    fs.writeFileSync(p, Buffer.from([0x00, 0x01, 0x02, 0xFF]));
+    const rel = path.relative(process.cwd(), p);
+    const result = await readFile({ path: rel });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.toLowerCase()).toContain("binary");
+    }
+  });
+
+  it("blocks path traversal outside cwd in production but allows tmp in test", async () => {
+    // In test env, isInsideCwd allows tmp, but should still block /etc
+    const result = await readFile({ path: "/etc/passwd" });
+    expect(result.success).toBe(false);
   });
 });

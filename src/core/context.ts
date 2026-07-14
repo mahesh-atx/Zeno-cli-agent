@@ -1,17 +1,18 @@
 // src/core/context.ts
 import * as fs from "fs";
 import * as path from "path";
-import { countTokens } from "../utils/tokens";
+import { countTokens, countMessageTokens } from "../utils/tokens";
 import type { Message } from "./conversation";
+import { TOKEN_LIMITS } from "../providers/registry";
+import type { ProviderName } from "./config";
 
-// ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ContextFile {
   filePath: string;
   content: string;
   tokens: number;
   addedAt: Date;
-  /** How the file entered context — @mention or /add command */
   source: "mention" | "command";
 }
 
@@ -31,28 +32,28 @@ export interface TruncationResult {
   tokensSaved: number;
 }
 
-// ━━━ Limits ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export { TOKEN_LIMITS } from "../providers/registry";
 
-export const TOKEN_LIMITS: Record<string, number> = {
-  openrouter: 128000,
-  groq:        32768,
-  nvidia:     128000,
-  opencodezen: 128000,
-};
-
-// Truncation fires at 85% of limit
 const TRUNCATION_THRESHOLD = 0.85;
-
-// Warning shown in UI at 70%
-export const WARNING_THRESHOLD = 0.70;
-
-// Max file size for /add and @mention
+const WARNING_THRESHOLD = 0.70;
 const MAX_FILE_TOKENS = 50000;
-
-// Minimum messages to always keep (system + last 3 pairs)
 const MIN_MESSAGES_TO_KEEP = 7;
 
-// ━━━ Context Manager ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getTokenLimitForProvider(provider: string): number {
+  return TOKEN_LIMITS[provider as ProviderName] ?? 128000;
+}
+
+function safeCountMessageTokens(msg: Message): number {
+  try {
+    return countMessageTokens(msg as any);
+  } catch {
+    // Fallback to simple string length if counting fails
+    const content = typeof (msg as any).content === "string" ? (msg as any).content : JSON.stringify((msg as any).content);
+    return countTokens(content) + 4;
+  }
+}
+
+// ─── Context Manager ──────────────────────────────────────────────────────────
 
 export class ContextManager {
   private files: Map<string, ContextFile> = new Map();
@@ -61,8 +62,6 @@ export class ContextManager {
   constructor(provider: string) {
     this.provider = provider;
   }
-
-  // ─── File Management ─────────────────────────────────────────
 
   addFile(
     filePath: string,
@@ -73,40 +72,104 @@ export class ContextManager {
     tokens?: number;
     lines?: number;
   } {
-    const resolved = path.resolve(process.cwd(), filePath);
-
-    if (!fs.existsSync(resolved)) {
-      return { success: false, error: `File not found: ${filePath}` };
-    }
-
-    let content: string;
     try {
-      content = fs.readFileSync(resolved, "utf-8");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      return { success: false, error: `Cannot read file: ${msg}` };
+      const guards = require("../tools/guards") as typeof import("../tools/guards");
+      const safe = guards.assertSafePath(filePath);
+      if (safe.error) {
+        return { success: false, error: safe.error };
+      }
+      const resolved = safe.resolved;
+
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: `File not found: ${filePath}` };
+      }
+
+      const stat = fs.statSync(resolved);
+      if (stat.isDirectory()) {
+        return { success: false, error: `Path is a directory, not a file: ${filePath}` };
+      }
+
+      const sizeCheck = guards.checkFileSize(stat.size, guards.LIMITS.MAX_READ_BYTES);
+      if (!sizeCheck.ok) {
+        return { success: false, error: sizeCheck.error };
+      }
+
+      if (guards.isBinaryFileSync(resolved)) {
+        return { success: false, error: `Binary file detected: ${filePath}` };
+      }
+
+      let content: string;
+      try {
+        content = fs.readFileSync(resolved, "utf-8");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return { success: false, error: `Cannot read file: ${msg}` };
+      }
+
+      const tokens = countTokens(content);
+      if (tokens > MAX_FILE_TOKENS) {
+        return {
+          success: false,
+          error: `File too large (${tokens.toLocaleString()} tokens, max ${MAX_FILE_TOKENS.toLocaleString()})`,
+        };
+      }
+
+      const currentFileTokens = this.getFileTokens();
+      const limit = this.getTokenLimit();
+      if (currentFileTokens + tokens > limit * 0.8) {
+        return {
+          success: false,
+          error: `Adding ${filePath} would exceed context limit: ${currentFileTokens.toLocaleString()} + ${tokens.toLocaleString()} > ${(limit * 0.8).toLocaleString()} (80% of ${limit.toLocaleString()})`,
+        };
+      }
+
+      const lines = content.split("\n").length;
+
+      this.files.set(filePath, {
+        filePath,
+        content,
+        tokens,
+        addedAt: new Date(),
+        source,
+      });
+
+      return { success: true, tokens, lines };
+    } catch {
+      const resolved = path.resolve(process.cwd(), filePath);
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: `File not found: ${filePath}` };
+      }
+      let content: string;
+      try {
+        content = fs.readFileSync(resolved, "utf-8");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return { success: false, error: `Cannot read file: ${msg}` };
+      }
+      const tokens = countTokens(content);
+      if (tokens > MAX_FILE_TOKENS) {
+        return {
+          success: false,
+          error: `File too large (${tokens.toLocaleString()} tokens, max ${MAX_FILE_TOKENS.toLocaleString()})`,
+        };
+      }
+      const totalNow = this.getFileTokens();
+      if (totalNow + tokens > this.getTokenLimit() * 0.8) {
+        return {
+          success: false,
+          error: `Would exceed context limit`,
+        };
+      }
+      const lines = content.split("\n").length;
+      this.files.set(filePath, {
+        filePath,
+        content,
+        tokens,
+        addedAt: new Date(),
+        source,
+      });
+      return { success: true, tokens, lines };
     }
-
-    const tokens = countTokens(content);
-
-    if (tokens > MAX_FILE_TOKENS) {
-      return {
-        success: false,
-        error: `File too large (${tokens.toLocaleString()} tokens, max ${MAX_FILE_TOKENS.toLocaleString()})`,
-      };
-    }
-
-    const lines = content.split("\n").length;
-
-    this.files.set(filePath, {
-      filePath,
-      content,
-      tokens,
-      addedAt: new Date(),
-      source,
-    });
-
-    return { success: true, tokens, lines };
   }
 
   removeFile(filePath: string): boolean {
@@ -129,11 +192,6 @@ export class ContextManager {
     this.files.clear();
   }
 
-  // ─── System Prompt Injection ──────────────────────────────────
-  // Builds the file context block that gets PREPENDED to the
-  // system prompt on every request. This is the core of context
-  // management — the LLM always sees the files.
-
   buildContextBlock(): string {
     if (this.files.size === 0) return "";
 
@@ -153,17 +211,11 @@ export class ContextManager {
     return parts.join("\n");
   }
 
-  /**
-   * Builds the full system prompt with context files injected.
-   * Call this to get the prompt that should be sent to the provider.
-   */
   buildSystemPrompt(baseSystemPrompt: string): string {
     const contextBlock = this.buildContextBlock();
     if (!contextBlock) return baseSystemPrompt;
     return `${contextBlock}\n---\n${baseSystemPrompt}`;
   }
-
-  // ─── Token Tracking ───────────────────────────────────────────
 
   getFileTokens(): number {
     let total = 0;
@@ -174,27 +226,18 @@ export class ContextManager {
   }
 
   getTokenLimit(): number {
-    return TOKEN_LIMITS[this.provider] ?? 128000;
+    return getTokenLimitForProvider(this.provider);
   }
 
-  /**
-   * Returns total tokens used including files + conversation history.
-   */
   getTotalTokensUsed(historyTokens: number): number {
     return this.getFileTokens() + historyTokens;
   }
 
-  /**
-   * Whether adding N more tokens would exceed the warning threshold.
-   */
   willExceedWarning(additionalTokens: number, historyTokens: number): boolean {
     const total = this.getTotalTokensUsed(historyTokens) + additionalTokens;
     return total > this.getTokenLimit() * WARNING_THRESHOLD;
   }
 
-  /**
-   * Whether adding N more tokens would exceed the hard truncation limit.
-   */
   willExceedLimit(additionalTokens: number, historyTokens: number): boolean {
     const total = this.getTotalTokensUsed(historyTokens) + additionalTokens;
     return total > this.getTokenLimit() * TRUNCATION_THRESHOLD;
@@ -217,60 +260,37 @@ export class ContextManager {
     };
   }
 
-  // ─── Auto-Truncation ──────────────────────────────────────────
-
   shouldTruncate(historyTokens: number): boolean {
     const used = this.getFileTokens() + historyTokens;
     const limit = this.getTokenLimit();
     return used / limit >= TRUNCATION_THRESHOLD;
   }
 
-  /**
-   * Removes oldest user+assistant pairs from conversation history
-   * until we are back below the truncation threshold.
-   *
-   * Rules:
-   * - System prompt (index 0) is NEVER removed
-   * - Always keeps at least the last 3 user+assistant pairs
-   * - Removes oldest pairs first (from index 1 forward)
-   * - Returns how many messages and tokens were removed
-   */
   truncateHistory(messages: Message[]): TruncationResult {
-    // Not enough to truncate
     if (messages.length <= MIN_MESSAGES_TO_KEEP) {
       return { truncated: messages, removedCount: 0, tokensSaved: 0 };
     }
 
-    const system = messages[0];  // Always keep system prompt
+    const system = messages[0];
     let working = messages.slice(1);
     let removedCount = 0;
     let tokensSaved = 0;
 
     while (working.length > MIN_MESSAGES_TO_KEEP - 1) {
       const fileTokens = this.getFileTokens();
-      const histTokens = working.reduce(
-        (acc, m) => acc + countTokens(m.content) + 4,
-        0
-      );
+      const histTokens = working.reduce((acc, m) => acc + safeCountMessageTokens(m), 0);
       const used = fileTokens + histTokens;
       const limit = this.getTokenLimit();
 
-      // Below threshold — stop truncating
       if (used / limit < TRUNCATION_THRESHOLD) break;
 
-      // Remove the oldest pair (user message at index 0,
-      // assistant reply at index 1)
       if (working.length >= 2) {
         const removed = working.slice(0, 2);
-        tokensSaved += removed.reduce(
-          (acc, m) => acc + countTokens(m.content) + 4,
-          0
-        );
+        tokensSaved += removed.reduce((acc, m) => acc + safeCountMessageTokens(m), 0);
         working = working.slice(2);
         removedCount += 2;
       } else {
-        // Only one message left — remove it
-        tokensSaved += countTokens(working[0].content) + 4;
+        tokensSaved += safeCountMessageTokens(working[0]);
         working = [];
         removedCount += 1;
         break;
@@ -283,8 +303,6 @@ export class ContextManager {
       tokensSaved,
     };
   }
-
-  // ─── Provider Switch ──────────────────────────────────────────
 
   setProvider(provider: string): void {
     this.provider = provider;

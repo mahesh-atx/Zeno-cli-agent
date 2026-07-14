@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { askPermission } from "../core/permissions";
 import { getPatchFromContents } from "../utils/diff";
+import { assertSafePath, checkFileSize, LIMITS } from "./guards";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -20,57 +21,28 @@ export interface WriteFileOutput {
   path: string;
   bytesWritten: number;
   isNew: boolean;
-  preview?: string; // NEW: Diff preview for UI
+  preview?: string;
   hunks?: import("diff").StructuredPatchHunk[];
-  hints?: string[]; // NEW: Post-write hints
+  hints?: string[];
 }
 
 export interface WriteFileError {
   success: false;
   error: string;
   path: string;
-  hints?: string[]; // NEW: Actionable error hints
+  hints?: string[];
 }
 
 export type WriteFileResult = WriteFileOutput | WriteFileError;
 
-// ─── Modern Agent Upgrades ────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Protected directories that LLMs should NEVER write to
-const PROTECTED_DIRS = [
-  "node_modules",
-  ".git",
-  ".next",
-  ".nuxt",
-  "dist",
-  "build",
-  ".venv",
-  "venv",
-  "__pycache__",
-  ".cache",
-];
-
-function isProtectedPath(resolvedPath: string): boolean {
-  const normalized = resolvedPath.replace(/\\/g, "/");
-  return PROTECTED_DIRS.some((dir) => {
-    // Check if the path contains /node_modules/ or starts with node_modules/
-    const regex = new RegExp(`(^|/)${dir}(/|$)`);
-    return regex.test(normalized);
-  });
-}
-
-/**
- * MODERN UPGRADE 1: Safer, Faster Diff Preview
- * Replaces the O(N*M) array filter with a simple line-count delta and 
- * a preview of the new file. This prevents terminal UI crashes and 
- * handles files with many duplicate lines correctly.
- */
 function buildDiffPreview(
   oldContent: string | null,
   newContent: string
 ): { details: string[]; summary: string } {
   const newLines = newContent.split("\n");
-  
+
   if (oldContent === null) {
     const preview = newLines.slice(0, 15).map((line) => `+ ${line}`);
     if (newLines.length > 15) {
@@ -84,7 +56,8 @@ function buildDiffPreview(
 
   const oldLines = oldContent.split("\n");
   const delta = newLines.length - oldLines.length;
-  
+
+  // Show actual diff preview for overwrite: first 15 new lines
   const preview = newLines.slice(0, 15).map((line) => `+ ${line}`);
   if (newLines.length > 15) {
     preview.push(`  ... (${newLines.length - 15} more lines)`);
@@ -99,32 +72,56 @@ function buildDiffPreview(
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
 export async function writeFile(input: WriteFileInput): Promise<WriteFileResult> {
-  const resolved = path.resolve(process.cwd(), input.path);
-
-  // MODERN UPGRADE 2: Empty Content Guardrail
-  if (!input.content || input.content.trim().length === 0) {
+  // Safe path check
+  const safe = assertSafePath(input.path);
+  if (safe.error) {
     return {
       success: false,
-      error: "Cannot write empty file. Ensure you are providing the full file content.",
-      path: input.path,
-      hints: ["If you meant to delete the file, use a 'delete_file' tool or 'run_command' with rm instead."],
-    };
-  }
-
-  // MODERN UPGRADE 3: Protected Path Guardrail
-  if (isProtectedPath(resolved)) {
-    return {
-      success: false,
-      error: `Blocked: Cannot write to protected directory '${input.path}'.`,
+      error: safe.error,
       path: input.path,
       hints: [
-        "Writing to node_modules, .git, or build directories is strictly prohibited.",
+        "Writing outside project root or to protected directories is prohibited.",
         "If you need to install a package, use 'run_command' with npm/yarn/pnpm.",
       ],
     };
   }
+  const resolved = safe.resolved;
 
-  // Check if file already exists
+  // Empty content guard — allow whitespace? Require at least length >0, warn on whitespace-only
+  if (!input.content || input.content.length === 0) {
+    return {
+      success: false,
+      error: "Cannot write empty file. Provide full file content.",
+      path: input.path,
+      hints: ["If you meant to delete the file, use 'delete_file' tool."],
+    };
+  }
+
+  if (input.content.trim().length === 0) {
+    // Whitespace-only is suspicious but allowed? Block with hint, as likely LLM error
+    return {
+      success: false,
+      error: "Cannot write file with only whitespace. Provide meaningful content.",
+      path: input.path,
+      hints: ["Ensure file content is not just spaces/newlines."],
+    };
+  }
+
+  // Size guard
+  const sizeCheck = checkFileSize(Buffer.byteLength(input.content, "utf-8"), LIMITS.MAX_WRITE_BYTES);
+  if (!sizeCheck.ok) {
+    return {
+      success: false,
+      error: `Content too large: ${(Buffer.byteLength(input.content, "utf-8") / 1024 / 1024).toFixed(2)}MB exceeds ${(LIMITS.MAX_WRITE_BYTES / 1024 / 1024).toFixed(0)}MB limit`,
+      path: input.path,
+      hints: [
+        "Split file into smaller chunks",
+        "Use apply_patch for large refactors",
+        "Consider if file should be generated via run_command instead",
+      ],
+    };
+  }
+
   let existingContent: string | null = null;
   let isNew = true;
   let isDirectory = false;
@@ -141,7 +138,6 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
     isNew = true;
   }
 
-  // MODERN UPGRADE 4: Directory Conflict Resolution
   if (isDirectory) {
     return {
       success: false,
@@ -149,12 +145,11 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
       path: input.path,
       hints: [
         "You cannot overwrite a directory with file content.",
-        "If you meant to create a file inside this directory, append a filename to the path (e.g., 'src/utils/myFile.ts').",
+        "Append a filename: e.g., 'src/utils/myFile.ts'",
       ],
     };
   }
 
-  // Build diff preview for permission prompt
   const { details, summary } = buildDiffPreview(existingContent, input.content);
   const action = isNew ? "CREATE FILE" : "OVERWRITE FILE";
 
@@ -173,28 +168,29 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
   }
 
   try {
-    // Create parent directories if they don't exist
     const dir = path.dirname(resolved);
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (mkdirError: any) {
-      // MODERN UPGRADE 5: ENOTDIR handling (parent path is a file)
       if (mkdirError.code === "ENOTDIR") {
         return {
           success: false,
-          error: `Cannot create directory for '${input.path}' because a file already exists in the parent path.`,
+          error: `Cannot create directory for '${input.path}' because a file exists in parent path.`,
           path: input.path,
           hints: [
-            "Check your path. One of the parent segments is a file, not a folder.",
-            "Use 'list_files' to verify the correct directory structure.",
+            "Check your path. One parent segment is a file, not folder.",
+            "Use 'list_files' to verify structure",
           ],
         };
       }
       throw mkdirError;
     }
 
-    // Write the file
-    fs.writeFileSync(resolved, input.content, "utf-8");
+    // Atomic write: temp file then rename to avoid partial writes
+    const tmpPath = resolved + `.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    fs.writeFileSync(tmpPath, input.content, "utf-8");
+    fs.renameSync(tmpPath, resolved);
+
     const bytesWritten = Buffer.byteLength(input.content, "utf-8");
 
     return {
@@ -208,7 +204,7 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
         oldContent: existingContent || "",
         newContent: input.content,
       }),
-      hints: isNew ? [] : ["File overwritten successfully. Ensure you ran any necessary linters or tests."],
+      hints: isNew ? [] : ["File overwritten. Run linters/tests if needed."],
     };
   } catch (error) {
     if (error instanceof Error) {
@@ -219,26 +215,23 @@ export async function writeFile(input: WriteFileInput): Promise<WriteFileResult>
           success: false,
           error: `Permission denied: cannot write to ${input.path}`,
           path: input.path,
-          hints: ["Check file permissions or try running the agent with elevated privileges."],
+          hints: ["Check file permissions"],
         };
       }
-      
       if (nodeError.code === "ENOSPC") {
         return {
           success: false,
           error: `No space left on device`,
           path: input.path,
-          hints: ["The disk is full. Free up space and try again."],
+          hints: ["Free up disk space"],
         };
       }
-
       return {
         success: false,
         error: `Could not write file: ${error.message}`,
         path: input.path,
       };
     }
-
     return {
       success: false,
       error: "Unknown error writing file",

@@ -15,5 +15,7 @@ export default defineConfig({
   banner: {
     js: "#!/usr/bin/env node",
   },
-  external: ["react", "ink"],
+  // Keep react and ink external for small bundle (ink alias resolves via node_modules/ink -> @jrichman/ink)
+  // Also externalize react-devtools-core which is an optional peer of ink that causes bundle failure when bundling ink
+  external: ["react", "ink", "react-devtools-core"],
 });

@@ -19,6 +19,7 @@ export interface ChatMessage {
 
 interface MessageItemProps {
   message: ChatMessage;
+  isLast?: boolean;
 }
 
 function UserMessage({ content }: { content: string }) {
@@ -37,11 +38,13 @@ function AssistantMessage({
   isStreaming,
   toolCalls,
   hideIcon,
+  isLast,
 }: {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
   hideIcon?: boolean;
+  isLast?: boolean;
 }) {
   const rendered = isStreaming
     ? renderStreaming(content)
@@ -54,7 +57,7 @@ function AssistantMessage({
       {toolCalls && toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
           {toolCalls.map((tc) => (
-            <ToolOutput key={tc.id} toolCall={tc} />
+            <ToolOutput key={tc.id} toolCall={tc} isLast={isLast} />
           ))}
         </Box>
       )}
@@ -102,7 +105,7 @@ function SystemNotice({ content }: { content: string }) {
   );
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, isLast }: MessageItemProps) {
   switch (message.role) {
     case "user":
       return <UserMessage content={message.content} />;
@@ -113,6 +116,7 @@ export function MessageItem({ message }: MessageItemProps) {
           isStreaming={message.isStreaming}
           toolCalls={message.toolCalls}
           hideIcon={message.hideIcon}
+          isLast={isLast}
         />
       );
     case "error":

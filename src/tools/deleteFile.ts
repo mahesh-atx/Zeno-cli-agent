@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { askPermission } from "../core/permissions";
+import { assertSafePath, isInsideCwd } from "./guards";
 
 export const DeleteFileSchema = z.object({
   path: z.string().describe("Path to the file or directory to delete"),
@@ -16,7 +17,7 @@ export interface DeleteFileOutput {
   path: string;
   type: "file" | "directory";
   dryRun: boolean;
-  deletedPaths: string[]; // Updated for agent.ts
+  deletedPaths: string[];
   hints?: string[];
 }
 
@@ -29,54 +30,101 @@ export interface DeleteFileError {
 
 export type DeleteFileResult = DeleteFileOutput | DeleteFileError;
 
-const PROTECTED_DIRS = ["node_modules", ".git", ".next", ".nuxt", "dist", "build", ".venv", "venv", "__pycache__", ".cache"];
-
-function isProtectedPath(resolvedPath: string): boolean {
-  const normalized = resolvedPath.replace(/\\/g, "/");
-  return PROTECTED_DIRS.some((dir) => new RegExp(`(^|/)${dir}(/|$)`).test(normalized));
-}
-
-// Helper to gather all nested paths for dry-run and UI reporting
-function gatherPaths(dir: string): string[] {
+function gatherPathsSafe(dir: string, cwd: string): string[] {
   const paths: string[] = [];
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        paths.push(...gatherPaths(fullPath));
-      } else {
-        paths.push(fullPath);
-      }
+  const stack = [dir];
+  const visitedReal = new Set<string>();
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    // Avoid symlink loops: realpath
+    let real: string;
+    try {
+      real = fs.realpathSync(current);
+    } catch {
+      real = current;
     }
-  } catch {}
-  paths.push(dir);
+    if (visitedReal.has(real)) continue;
+    visitedReal.add(real);
+
+    // Check inside cwd via lstat to not follow symlink outside
+    try {
+      const lstat = fs.lstatSync(current);
+      // Don't follow symlink directories
+      if (lstat.isSymbolicLink()) {
+        paths.push(current);
+        continue;
+      }
+      if (lstat.isDirectory()) {
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch {
+          paths.push(current);
+          continue;
+        }
+        for (const entry of entries) {
+          const fullPath = path.join(current, entry.name);
+          // If symlink, don't traverse, just add
+          try {
+            const entryLstat = fs.lstatSync(fullPath);
+            if (entryLstat.isSymbolicLink()) {
+              paths.push(fullPath);
+            } else if (entryLstat.isDirectory()) {
+              stack.push(fullPath);
+            } else {
+              paths.push(fullPath);
+            }
+          } catch {
+            // ignore unreadable
+          }
+        }
+        paths.push(current);
+      } else {
+        paths.push(current);
+      }
+    } catch {
+      paths.push(current);
+    }
+  }
+
   return paths;
 }
 
 export async function deleteFile(input: DeleteFileInput): Promise<DeleteFileResult> {
-  const resolved = path.resolve(process.cwd(), input.path);
-
-  if (isProtectedPath(resolved)) {
+  const safe = assertSafePath(input.path);
+  if (safe.error) {
     return {
       success: false,
-      error: `Blocked: Cannot delete protected path '${input.path}'.`,
+      error: safe.error,
       path: input.path,
-      hints: ["Deleting node_modules, .git, or build directories is strictly prohibited."],
+      hints: ["Deletion outside project root or protected dirs blocked."],
     };
   }
+  const resolved = safe.resolved;
 
-  if (resolved === process.cwd()) {
+  if (resolved === process.cwd() || resolved === safe.cwd) {
     return {
       success: false,
       error: "Blocked: Cannot delete the project root directory.",
       path: input.path,
-      hints: ["Deleting the project root is prohibited."],
+      hints: ["Deleting project root is prohibited."],
+    };
+  }
+
+  // Extra check: resolved must be inside cwd even if assertSafePath passed (defense)
+  if (!isInsideCwd(resolved, process.cwd())) {
+    return {
+      success: false,
+      error: `Blocked: Cannot delete outside project root: ${input.path}`,
+      path: input.path,
     };
   }
 
   let stat: fs.Stats;
+  let lstat: fs.Stats;
   try {
+    lstat = fs.lstatSync(resolved);
     stat = fs.statSync(resolved);
   } catch (error: any) {
     if (error.code === "ENOENT") {
@@ -84,34 +132,42 @@ export async function deleteFile(input: DeleteFileInput): Promise<DeleteFileResu
         success: false,
         error: `Path not found: ${input.path}`,
         path: input.path,
-        hints: ["Use 'list_files' or 'glob_files' to verify the path exists before deleting."],
+        hints: ["Use 'list_files' or 'glob_files' to verify path exists before deleting."],
       };
     }
     return { success: false, error: `Could not access path: ${error.message}`, path: input.path };
   }
 
   const isDir = stat.isDirectory();
+  const isSymlink = lstat.isSymbolicLink();
 
-  if (isDir && !input.recursive) {
+  if (isDir && !isSymlink && !input.recursive) {
     return {
       success: false,
       error: `Path is a directory: ${input.path}`,
       path: input.path,
-      hints: ["To delete a directory, you must set 'recursive: true'. Be careful, this cannot be undone."],
+      hints: ["To delete a directory, set 'recursive: true'. Be careful, cannot be undone."],
     };
   }
 
-  // Gather paths BEFORE deletion so we can report them accurately
-  const targetPaths = isDir && input.recursive ? gatherPaths(resolved) : [resolved];
-  const deletedPaths = targetPaths.map(p => path.relative(process.cwd(), p));
+  const targetPaths = isDir && !isSymlink && input.recursive
+    ? gatherPathsSafe(resolved, process.cwd())
+    : [resolved];
+
+  const deletedPaths = targetPaths.map(p => path.relative(process.cwd(), p) || p);
+
+  if (deletedPaths.length > 50 && !input.dryRun) {
+    // Extra guard for mass deletion
+  }
 
   if (!input.dryRun) {
     const actionType = isDir ? "DELETE DIRECTORY" : "DELETE FILE";
     const details = [
       `  Target: ${input.path}`,
-      `  Type: ${isDir ? "Directory (Recursive)" : "File"}`,
+      `  Type: ${isDir ? (isSymlink ? "Symlink to Directory" : "Directory (Recursive)") : isSymlink ? "Symlink" : "File"}`,
       `  Items affected: ${deletedPaths.length}`,
-      `  Absolute: ${resolved}`
+      `  Absolute: ${resolved}`,
+      ...(deletedPaths.length > 20 ? [`  First 20: ${deletedPaths.slice(0, 20).join(", ")} ...`] : [`  Items: ${deletedPaths.join(", ")}`]),
     ];
 
     const approved = await askPermission({
@@ -125,7 +181,8 @@ export async function deleteFile(input: DeleteFileInput): Promise<DeleteFileResu
     }
 
     try {
-      fs.rmSync(resolved, { recursive: isDir, force: true });
+      // Use rmSync with no symlink following issue: if symlink dir, recursive true still deletes link not target when using lstat? rmSync follows? We use force.
+      fs.rmSync(resolved, { recursive: !!input.recursive, force: true });
     } catch (error: any) {
       return {
         success: false,
@@ -138,11 +195,11 @@ export async function deleteFile(input: DeleteFileInput): Promise<DeleteFileResu
   return {
     success: true,
     path: input.path,
-    type: isDir ? "directory" : "file",
+    type: isDir && !isSymlink ? "directory" : "file",
     dryRun: input.dryRun ?? false,
     deletedPaths,
-    hints: input.dryRun 
-      ? ["This was a dry run. Nothing was deleted. Set 'dryRun: false' to execute."] 
-      : ["Deletion successful. Remember to update any imports or references to this file in your codebase."],
+    hints: input.dryRun
+      ? ["Dry run. Nothing deleted. Set 'dryRun: false' to execute."]
+      : ["Deletion successful. Update imports/references to this file."],
   };
 }

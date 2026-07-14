@@ -2,3 +2,19 @@ node_modules/
 dist/
 .env
 *.js.map
+
+# Zeno CLI Agent - generated / local files
+.cli_agent_todos.json
+.cli-agent/session.json
+.cli-agent/debug.log
+.cli-agent/*.log
+.cli-agent/cache/
+
+# Theme persistence dotfile (optional local override)
+# .cli-agent-theme is in home dir, but if created locally ignore
+.cli-agent-theme
+
+# OS
+.DS_Store
+Thumbs.db
+

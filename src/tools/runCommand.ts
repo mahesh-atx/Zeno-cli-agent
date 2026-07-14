@@ -1,12 +1,14 @@
 import { z } from "zod";
 import execa from "execa";
 import { askPermission } from "../core/permissions";
+import { assertSafePath, isDangerousCommand, LIMITS } from "./guards";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 export const RunCommandSchema = z.object({
-  command: z.string().describe("Shell command to execute"),
+  command: z.string().min(1).describe("Shell command to execute"),
   cwd: z.string().optional().describe("Working directory. Defaults to current directory."),
+  timeout: z.number().int().positive().max(120000).optional().describe("Timeout in ms, default 60000, max 120000"),
 });
 
 export type RunCommandInput = z.infer<typeof RunCommandSchema>;
@@ -14,41 +16,33 @@ export type RunCommandInput = z.infer<typeof RunCommandSchema>;
 // ─── Output ───────────────────────────────────────────────────────────────────
 
 export interface RunCommandOutput {
-  success: true; // Means the tool successfully executed the process
+  success: true;
   stdout: string;
   stderr: string;
-  exitCode: number; // 0 means command succeeded, >0 means command failed
+  exitCode: number;
   duration: number;
   command: string;
-  hints?: string[]; // NEW: Actionable hints if exitCode !== 0
+  hints?: string[];
 }
 
 export interface RunCommandError {
-  success: false; // Means the tool failed to execute the process (timeout, crash)
+  success: false;
   error: string;
   stdout?: string;
   stderr?: string;
   exitCode?: number;
   command: string;
-  hints?: string[]; // NEW
+  hints?: string[];
 }
 
 export type RunCommandResult = RunCommandOutput | RunCommandError;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Increased to 60s. Modern builds (Next.js, heavy TS) often take >30s.
-const COMMAND_TIMEOUT_MS = 60_000; 
-
-// Limits output to ~7k tokens. Crucial for preventing context window overflow.
-const MAX_OUTPUT_CHARS = 30000; 
+const DEFAULT_TIMEOUT = 60_000;
+const MAX_OUTPUT_CHARS = LIMITS.MAX_TOOL_OUTPUT_CHARS;
 const MAX_OUTPUT_LINES = 400;
 
-/**
- * MODERN UPGRADE 1: Smart Truncation
- * Keeps the beginning (setup logs) and the end (actual errors/summaries), 
- * omitting the massive middle section of repetitive logs.
- */
 function truncateOutput(output: string): string {
   if (!output) return "";
   if (output.length <= MAX_OUTPUT_CHARS) return output;
@@ -59,50 +53,44 @@ function truncateOutput(output: string): string {
   }
 
   const head = lines.slice(0, 50).join("\n");
-  const tailLinesCount = MAX_OUTPUT_LINES - 50;
-  const tail = lines.slice(-tailLinesCount).join("\n");
+  const tailCount = MAX_OUTPUT_LINES - 50;
+  const tail = lines.slice(-tailCount).join("\n");
   const omitted = lines.length - MAX_OUTPUT_LINES;
 
   return `${head}\n\n... [${omitted} lines omitted to save context] ...\n\n${tail}`;
 }
 
-/**
- * MODERN UPGRADE 2: Context Injection (Smart Hints)
- * Analyzes the output to tell the LLM exactly why it failed and how to fix it.
- */
 function generateHints(command: string, exitCode: number, stdout: string, stderr: string): string[] {
   if (exitCode === 0) return [];
-
   const hints: string[] = [];
   const combined = (stdout + "\n" + stderr).toLowerCase();
 
-  // 1. Missing scripts / Command not found
   if (combined.includes("missing script") || combined.includes("command not found") || combined.includes("not recognized as")) {
     if (command.match(/^(npm|yarn|pnpm) run /)) {
-      hints.push("The script was not found in package.json. Run 'cat package.json' to verify available scripts, or check for typos.");
+      hints.push("Script not found in package.json. Run 'cat package.json' to verify available scripts.");
     } else {
-      hints.push("The command was not found. Ensure the binary is installed (e.g., via 'npm install') and available in the PATH.");
+      hints.push("Command not found. Ensure binary is installed (e.g., via 'npm install') and in PATH.");
     }
   }
 
-  // 2. Dependency issues
   if (command.includes("install") && (combined.includes("eresolve") || combined.includes("peer dep"))) {
-    hints.push("Dependency resolution failed due to peer dependency conflicts. Try adding '--legacy-peer-deps' or '--force' to the install command.");
+    hints.push("Dependency resolution failed due to peer conflicts. Try adding '--legacy-peer-deps' or '--force'.");
   }
 
-  // 3. Compilation / Linting errors
   if (combined.includes("error ts") || combined.includes("tsc") || combined.includes("eslint")) {
-    hints.push("There are compilation or linting errors. Read the specific error messages in the output to identify and fix the issues in the code.");
+    hints.push("Compilation or linting errors. Read specific errors in output to fix code.");
   }
 
-  // 4. Test failures
   if (command.includes("test") && (combined.includes("failed") || combined.includes("failing") || combined.includes("✖"))) {
-    hints.push("Tests failed. Review the test output to identify which assertions failed and update the implementation or tests accordingly.");
+    hints.push("Tests failed. Review output to identify failing assertions.");
   }
 
-  // 5. Git errors
   if (command.startsWith("git ") && combined.includes("conflict")) {
-    hints.push("Git merge/rebase conflict detected. You need to resolve the conflicts in the files manually before continuing.");
+    hints.push("Git merge/rebase conflict detected. Resolve conflicts manually.");
+  }
+
+  if (combined.includes("enoent") && combined.includes("no such file")) {
+    hints.push("File or directory not found. Check path existence.");
   }
 
   return hints;
@@ -111,7 +99,32 @@ function generateHints(command: string, exitCode: number, stdout: string, stderr
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
 export async function runCommand(input: RunCommandInput): Promise<RunCommandResult> {
-  const cwd = input.cwd ?? process.cwd();
+  // Validate cwd safe path
+  const cwdInput = input.cwd ?? process.cwd();
+  const safeCwd = assertSafePath(cwdInput);
+  if (safeCwd.error) {
+    return {
+      success: false,
+      error: safeCwd.error,
+      command: input.command,
+      hints: ["Working directory must be inside project root."],
+    };
+  }
+  const cwd = safeCwd.resolved;
+
+  // Dangerous command check
+  const dangerousReasons = isDangerousCommand(input.command);
+  if (dangerousReasons.length > 0) {
+    return {
+      success: false,
+      error: `Blocked dangerous command: ${dangerousReasons.join("; ")}`,
+      command: input.command,
+      hints: [
+        "This command looks destructive. If you really need it, rewrite to be safer or ask user to run manually.",
+        `Reasons: ${dangerousReasons.join(", ")}`,
+      ],
+    };
+  }
 
   const approved = await askPermission({
     action: "run_command",
@@ -128,6 +141,7 @@ export async function runCommand(input: RunCommandInput): Promise<RunCommandResu
   }
 
   const startTime = Date.now();
+  const timeout = input.timeout ?? DEFAULT_TIMEOUT;
 
   try {
     const isWindows = process.platform === "win32";
@@ -135,8 +149,8 @@ export async function runCommand(input: RunCommandInput): Promise<RunCommandResu
 
     const result = await execa(input.command, [], {
       cwd,
-      timeout: COMMAND_TIMEOUT_MS,
-      reject: false, // Don't throw on non-zero exit
+      timeout,
+      reject: false,
       all: false,
       shell: shellOption,
     });
@@ -144,8 +158,6 @@ export async function runCommand(input: RunCommandInput): Promise<RunCommandResu
     const duration = Date.now() - startTime;
     const rawStdout = result.stdout ?? "";
     const rawStderr = result.stderr ?? "";
-    
-    // Generate hints from the FULL output before we truncate it for the LLM
     const hints = generateHints(input.command, result.exitCode ?? 0, rawStdout, rawStderr);
 
     return {
@@ -157,39 +169,28 @@ export async function runCommand(input: RunCommandInput): Promise<RunCommandResu
       command: input.command,
       ...(hints.length > 0 && { hints }),
     };
-  } catch (error) {
+  } catch (error: any) {
     const duration = Date.now() - startTime;
 
-    if (error instanceof Error) {
-      // MODERN UPGRADE 3: Intelligent Timeout Handling
-      if (error.message.includes("timed out") || error.message.includes("ETIMEDOUT")) {
-        const hints: string[] = [];
-        
-        // Detect if it's a long-running server
-        if (input.command.match(/\b(start|dev|serve|watch)\b/)) {
-          hints.push("This command appears to be a long-running server/process. It timed out because it doesn't exit. Consider running it in the background (e.g., appending ' &') or use a dedicated tool if available.");
-        } else {
-          hints.push("The command timed out. It might be waiting for interactive user input, stuck in a loop, or just very slow.");
-        }
-
-        return {
-          success: false,
-          error: `Command timed out after ${COMMAND_TIMEOUT_MS / 1000}s.`,
-          command: input.command,
-          hints,
-        };
+    // Timeout detection - execa sets timedOut = true
+    if (error.timedOut || error.message?.toLowerCase().includes("timed out") || error.message?.includes("ETIMEDOUT")) {
+      const hints: string[] = [];
+      if (input.command.match(/\b(start|dev|serve|watch)\b/)) {
+        hints.push("Long-running server/process timed out because it doesn't exit. Consider running in background (append ' &') or use dedicated tool.");
+      } else {
+        hints.push("Command timed out. May be waiting for interactive input, stuck in loop, or slow. Try increasing timeout up to 120000ms.");
       }
-
       return {
         success: false,
-        error: `Command execution crashed: ${error.message}`,
+        error: `Command timed out after ${timeout / 1000}s.`,
         command: input.command,
+        hints,
       };
     }
 
     return {
       success: false,
-      error: "Unknown error running command",
+      error: `Command execution crashed: ${error.message}`,
       command: input.command,
     };
   }
