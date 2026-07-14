@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Box, Static, useInput, useApp } from "ink";
+import { Box, Text, Static, useInput, useApp } from "ink";
 import { WelcomeBanner } from "./WelcomeBanner";
 import { LivePreview } from "./LivePreview";
 import { InputBar } from "./InputBar";
@@ -18,6 +18,7 @@ import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
 import { QuestionPrompt } from "./QuestionPrompt";
 import { themeManager } from "../themes/theme-manager";
+import { Colors } from "../themes/colors";
 import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
 import { 
   isAuthEvent, 
@@ -627,7 +628,7 @@ export function App() {
           onPermissionRequest: requestPermission,
 
           onAgentEvent: (event: AgentEvent) => {
-            if (event.kind === "server_error" || event.kind === "network_error") {
+            if (event.kind !== "server_error" && event.kind !== "network_error" && event.kind !== "rate_limit" && event.kind !== "agent_paused" && event.kind !== "agent_turn_end") {
               pushNotice(`⚠ ${event.message}`);
             }
 
@@ -660,11 +661,7 @@ export function App() {
             setAgentStatus("network_dropped");
             setNetworkDropped(true);
             flushAll();
-            pushCompleted({
-              id: nextId(),
-              role: "error",
-              content: event.message,
-            });
+            // Do not push to completedMessages here; InputBar handles the "network dropped" UI state inline.
           },
 
           onFatalError: (event: AgentEvent) => {
@@ -674,15 +671,6 @@ export function App() {
               id: nextId(),
               role: "error",
               content: event.message,
-            });
-          },
-
-          onError: (error: Error) => {
-            flushAll();
-            pushCompleted({
-              id: nextId(),
-              role: "error",
-              content: error.message,
             });
           },
 
@@ -815,8 +803,22 @@ export function App() {
           />
         )}
 
-        {isLoading && !showLive && (
+        {isLoading && !showLive && agentStatus !== "retrying" && agentStatus !== "rate_limited" && agentStatus !== "network_dropped" && agentStatus !== "fatal_error" && (
           <LivePreview text="" activeTool={null} thinkingOnly />
+        )}
+
+        {agentStatus === "retrying" && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>└  </Text>
+            <Text color={Colors.AccentYellow}>↻ Connection failed. Retrying (attempt {retryAttempt})...</Text>
+          </Box>
+        )}
+
+        {agentStatus === "rate_limited" && rateLimitMs !== null && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>└  </Text>
+            <Text color={Colors.AccentYellow}>⏳ Rate limited by API. Waiting {Math.ceil(rateLimitMs / 1000)}s...</Text>
+          </Box>
         )}
 
         <Box marginTop={1} flexDirection="column">
@@ -871,7 +873,7 @@ export function App() {
             )}
           </Box>
 
-        {!isMenuOpen && (
+        {!isMenuOpen && !pendingQuestion && !pendingPermission && (
           <StatusLine
             provider={currentProvider}
             model={currentModel}

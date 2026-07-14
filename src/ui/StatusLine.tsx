@@ -82,48 +82,12 @@ function getGitBranch(): string | null {
   }
 }
 
-function AgentStatusIndicator({
-  agentStatus,
-  rateLimitMs,
-  retryAttempt,
-}: {
-  agentStatus: AgentStatus;
-  rateLimitMs: number | null;
-  retryAttempt: number;
-}) {
-  switch (agentStatus) {
-    case "running":
-      return <Text color={Colors.AccentCyan}>⬤ running</Text>;
-    case "retrying":
-      return (
-        <Text color={Colors.AccentYellow}>
-          ↻ retrying{retryAttempt > 0 ? ` (attempt ${retryAttempt + 1})` : ""}
-        </Text>
-      );
-    case "rate_limited": {
-      const secs = rateLimitMs !== null ? Math.ceil(rateLimitMs / 1000) : "...";
-      return <Text color={Colors.AccentYellow}>⏳ rate limited — wait {secs}s</Text>;
-    }
-    case "network_dropped":
-      return <Text color={Colors.AccentRed}>✖ network dropped — press R to retry</Text>;
-    case "fatal_error":
-      return <Text color={Colors.AccentRed}>✖ error — see above</Text>;
-    case "idle":
-    default:
-      return <Text color={Colors.AccentGreen}>● ready</Text>;
-  }
-}
-
 export function StatusLine({
   provider,
   model,
   tokenCount,
   tokenLimit,
   contextFileCount,
-  agentStatus = "idle",
-  rateLimitMs = null,
-  retryAttempt = 0,
-  networkDropped = false,
 }: StatusLineProps) {
   const tokenColor = getTokenColor(tokenCount, tokenLimit);
   const { bar, pct } = getTokenBar(tokenCount, tokenLimit, 10);
@@ -136,27 +100,23 @@ export function StatusLine({
     <Box flexDirection="column" marginTop={1}>
       <Box paddingX={1} flexDirection="row" justifyContent="space-between">
         {/* Left: provider + model + agent status */}
-        <Box gap={1}>
-          <Text color={Colors.AccentCyan} bold>CLI Agent</Text>
+        <Box gap={1} flexShrink={1}>
+          <Text color={Colors.AccentCyan} wrap="truncate">{provider}</Text>
           <Text color={Colors.Gray}>│</Text>
-          <Text color={Colors.AccentCyan}>{provider}</Text>
-          <Text color={Colors.Gray}>│</Text>
-          <Text color={Colors.AccentGreen}>{model}</Text>
-          <Text color={Colors.Gray}>│</Text>
-          <AgentStatusIndicator agentStatus={agentStatus} rateLimitMs={rateLimitMs} retryAttempt={retryAttempt} />
+          <Text color={Colors.AccentGreen} wrap="truncate">{model}</Text>
         </Box>
 
         {/* Right: cwd, branch, files, tokens with bar */}
-        <Box gap={1}>
+        <Box gap={1} flexShrink={0}>
           {cwdLabel && (
             <>
-              <Text color={Colors.Gray}>{cwdLabel}</Text>
+              <Text color={Colors.Gray} wrap="truncate-middle">{cwdLabel}</Text>
               <Text color={Colors.Gray}>│</Text>
             </>
           )}
           {gitBranch && (
             <>
-              <Text color={Colors.AccentPurple}> {gitBranch}</Text>
+              <Text color={Colors.AccentPurple} wrap="truncate"> {gitBranch}</Text>
               <Text color={Colors.Gray}>│</Text>
             </>
           )}
@@ -166,7 +126,6 @@ export function StatusLine({
               <Text color={Colors.Gray}>│</Text>
             </>
           )}
-          <Text color={barColor}>{bar}</Text>
           <Text color={tokenColor} bold>{formatTokenCount(tokenCount)}</Text>
           {tokenLimit > 0 && (
             <>

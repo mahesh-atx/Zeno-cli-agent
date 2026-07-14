@@ -22,7 +22,7 @@ import {
 // to degrade gracefully if the package is ever missing.
 let cachedHighlighter: SyntaxHighlighter | null | undefined;
 
-function getHighlighter(): SyntaxHighlighter | null {
+export function getHighlighter(): SyntaxHighlighter | null {
   if (cachedHighlighter !== undefined) return cachedHighlighter;
   try {
     cachedHighlighter = {

@@ -3,7 +3,8 @@ import { Box, Text } from "ink";
 import { ToolOutput, GroupedReadFilesOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
-import { renderMarkdown, renderStreaming } from "../utils/render";
+import { getHighlighter } from "../utils/render";
+import { Markdown } from "./Markdown";
 import { Colors } from "../themes/colors";
 
 export type MessageRole = "user" | "assistant" | "error" | "system-notice";
@@ -46,11 +47,7 @@ function AssistantMessage({
   hideIcon?: boolean;
   isLast?: boolean;
 }) {
-  const rendered = isStreaming
-    ? renderStreaming(content)
-    : content
-    ? renderMarkdown(content).trim()
-    : "";
+  const textContent = content + (isStreaming ? "\u258a" : "");
 
   return (
     <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
@@ -79,12 +76,9 @@ function AssistantMessage({
           <Box flexDirection="column">
             {isStreaming && !content && <Text color={Colors.Gray}>thinking…</Text>}
 
-            {rendered && (
+            {textContent && (
               <Box flexDirection="column">
-                <Ansi wrap="wrap">
-                  {rendered}
-                  {isStreaming ? "\u258a" : ""}
-                </Ansi>
+                <Markdown content={textContent} highlight={getHighlighter()} />
               </Box>
             )}
           </Box>
@@ -96,9 +90,13 @@ function AssistantMessage({
 
 function ErrorMessage({ content }: { content: string }) {
   return (
-    <Box marginTop={1}>
-      <Text color={Colors.AccentRed}>⚠ </Text>
-      <Text color={Colors.AccentRed} wrap="wrap">{content}</Text>
+    <Box flexDirection="row" marginTop={1}>
+      <Box width={2} flexShrink={0}>
+        <Text color={Colors.AccentRed}>│ </Text>
+      </Box>
+      <Box flexDirection="column">
+        <Text color={Colors.AccentRed} wrap="wrap">{content}</Text>
+      </Box>
     </Box>
   );
 }
