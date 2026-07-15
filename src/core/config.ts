@@ -8,7 +8,15 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ProviderName = "openrouter" | "groq" | "nvidia" | "opencodezen";
+export type ProviderName = "openrouter" | "groq" | "nvidia" | "opencodezen" | string;
+
+export interface CustomProviderProfile {
+  id: string;
+  name: string;
+  baseUrl: string;
+  defaultModel: string;
+  apiKey?: string;
+}
 
 export interface Config {
   openrouterApiKey: string | null;
@@ -20,6 +28,7 @@ export interface Config {
   temperature: number;
   maxTokens: number;
   debug?: boolean;
+  customProviders: CustomProviderProfile[];
 }
 
 interface FileConfig {
@@ -38,14 +47,15 @@ interface FileConfig {
     nvidia?: { apiKey?: string };
     opencodezen?: { apiKey?: string };
   };
+  customProviders?: CustomProviderProfile[];
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const VALID_PROVIDERS: ProviderName[] = ["openrouter", "groq", "nvidia", "opencodezen"];
 
-function isValidProvider(value: string): value is ProviderName {
-  return VALID_PROVIDERS.includes(value as ProviderName);
+function isValidProvider(value: string, fileConfigCustomProviders: CustomProviderProfile[] = []): boolean {
+  return VALID_PROVIDERS.includes(value as any) || fileConfigCustomProviders.some(p => p.id === value);
 }
 
 function readNumber(key: string, fallback: number, min?: number, max?: number): number {
@@ -107,6 +117,9 @@ function mergeFileConfigs(): FileConfig {
     if (xdgConfig.providers) {
       merged.providers = { ...(merged.providers || {}), ...xdgConfig.providers };
     }
+    if (xdgConfig.customProviders) {
+      merged.customProviders = [...(merged.customProviders || []), ...xdgConfig.customProviders];
+    }
   }
 
   for (const p of getProjectConfigPaths()) {
@@ -116,6 +129,9 @@ function mergeFileConfigs(): FileConfig {
       if (projConfig.providers) {
         merged.providers = { ...(merged.providers || {}), ...projConfig.providers };
       }
+      if (projConfig.customProviders) {
+        merged.customProviders = [...(merged.customProviders || []), ...projConfig.customProviders];
+      }
       break; // first project config wins
     }
   }
@@ -124,18 +140,21 @@ function mergeFileConfigs(): FileConfig {
 }
 
 function getApiKeyFromFileConfig(fileConfig: FileConfig, provider: ProviderName): string | undefined {
-  const flatKeyMap: Record<ProviderName, keyof FileConfig> = {
+  const flatKeyMap: Record<string, keyof FileConfig> = {
     openrouter: "openrouterApiKey",
     groq: "groqApiKey",
     nvidia: "nvidiaApiKey",
     opencodezen: "opencodezenApiKey",
   };
 
-  const flat = fileConfig[flatKeyMap[provider]] as string | undefined;
-  if (flat) return flat;
+  const key = flatKeyMap[provider];
+  if (key) {
+    const flat = fileConfig[key] as string | undefined;
+    if (flat) return flat;
+  }
 
-  if (fileConfig.providers && fileConfig.providers[provider]?.apiKey) {
-    return fileConfig.providers[provider]!.apiKey;
+  if (fileConfig.providers && (fileConfig.providers as any)[provider]?.apiKey) {
+    return (fileConfig.providers as any)[provider].apiKey;
   }
 
   return undefined;
@@ -152,7 +171,8 @@ function validateConfig(config: Config): void {
     config.openrouterApiKey !== null ||
     config.groqApiKey !== null ||
     config.nvidiaApiKey !== null ||
-    config.opencodezenApiKey !== null;
+    config.opencodezenApiKey !== null ||
+    config.customProviders.length > 0;
 
   if (!hasAnyKey) {
     errors.push(
@@ -172,7 +192,7 @@ function validateConfig(config: Config): void {
     opencodezen: config.opencodezenApiKey,
   };
 
-  if (hasAnyKey && providerKeyMap[config.defaultProvider] === null) {
+  if (hasAnyKey && VALID_PROVIDERS.includes(config.defaultProvider as any) && providerKeyMap[config.defaultProvider] === null) {
     errors.push(
       `DEFAULT_PROVIDER is set to "${config.defaultProvider}" but the matching API key is empty.\n` +
       `Set ${config.defaultProvider.toUpperCase()}_API_KEY in .env or change DEFAULT_PROVIDER.`
@@ -193,19 +213,19 @@ function loadConfig(): Config {
 
   const rawProvider = process.env.DEFAULT_PROVIDER ?? fileConfig.defaultProvider ?? "openrouter";
 
-  if (!isValidProvider(rawProvider)) {
+  if (!isValidProvider(rawProvider, fileConfig.customProviders || [])) {
     if (isTestEnv()) {
       console.warn(`[config] Invalid DEFAULT_PROVIDER "${rawProvider}" in test env, falling back to openrouter`);
     } else {
       console.error(
         `✗ Invalid DEFAULT_PROVIDER: "${rawProvider}"\n` +
-        `  Valid options: openrouter, groq, nvidia, opencodezen`
+        `  Valid options: openrouter, groq, nvidia, opencodezen, or a custom provider ID`
       );
       process.exit(1);
     }
   }
 
-  const safeProvider: ProviderName = isValidProvider(rawProvider) ? rawProvider : "openrouter";
+  const safeProvider: ProviderName = isValidProvider(rawProvider, fileConfig.customProviders || []) ? rawProvider : "openrouter";
 
   const config: Config = {
     openrouterApiKey:
@@ -253,6 +273,7 @@ function loadConfig(): Config {
       process.env.DEBUG === "1" ||
       process.env.DEBUG === "true" ||
       fileConfig.debug === true,
+    customProviders: fileConfig.customProviders || [],
   };
 
   if (config.debug) {
@@ -270,3 +291,40 @@ export const configFilePaths = {
   xdg: getXdgConfigPath(),
   project: getProjectConfigPaths(),
 };
+
+// ─── Custom Provider Persistence ─────────────────────────────────────────────
+
+export function saveCustomProvider(profile: CustomProviderProfile): void {
+  const p = getXdgConfigPath();
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const fileConfig = loadFileConfig(p) || {};
+  if (!fileConfig.customProviders) fileConfig.customProviders = [];
+
+  const idx = fileConfig.customProviders.findIndex(c => c.id === profile.id);
+  if (idx !== -1) {
+    fileConfig.customProviders[idx] = profile;
+  } else {
+    fileConfig.customProviders.push(profile);
+  }
+
+  fs.writeFileSync(p, JSON.stringify(fileConfig, null, 2), "utf-8");
+  
+  // Update in-memory config immediately
+  const memIdx = config.customProviders.findIndex(c => c.id === profile.id);
+  if (memIdx !== -1) config.customProviders[memIdx] = profile;
+  else config.customProviders.push(profile);
+}
+
+export function deleteCustomProvider(id: string): void {
+  const p = getXdgConfigPath();
+  const fileConfig = loadFileConfig(p);
+  if (!fileConfig || !fileConfig.customProviders) return;
+
+  fileConfig.customProviders = fileConfig.customProviders.filter(c => c.id !== id);
+  fs.writeFileSync(p, JSON.stringify(fileConfig, null, 2), "utf-8");
+
+  // Update in-memory config immediately
+  config.customProviders = config.customProviders.filter(c => c.id !== id);
+}

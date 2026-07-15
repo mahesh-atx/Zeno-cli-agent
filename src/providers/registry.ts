@@ -12,6 +12,7 @@ export interface ProviderDefinition {
   tokenLimit: number;
   getApiKey: (config: Config) => string | null;
   createModel: (apiKey: string, model: string) => any; // LanguageModel
+  isCustom?: boolean;
 }
 
 // ─── Model Lists (canonical source) ──────────────────────────────────────────
@@ -117,7 +118,7 @@ export const OPENROUTER_DEFAULT_MODEL = "poolside/laguna-m.1:free";
 
 // ─── Token Limits (single source) ────────────────────────────────────────────
 
-export const TOKEN_LIMITS: Record<ProviderName, number> = {
+export const TOKEN_LIMITS: Record<string, number> = {
   openrouter: 128000,
   groq: 32768,
   nvidia: 128000,
@@ -126,7 +127,7 @@ export const TOKEN_LIMITS: Record<ProviderName, number> = {
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
-export const providerRegistry: Record<ProviderName, ProviderDefinition> = {
+export const builtinProviders: Record<string, ProviderDefinition> = {
   openrouter: {
     id: "openrouter",
     label: "OpenRouter",
@@ -139,8 +140,8 @@ export const providerRegistry: Record<ProviderName, ProviderDefinition> = {
         apiKey,
         baseURL: "https://openrouter.ai/api/v1",
         headers: {
-          "HTTP-Referer": "https://github.com/cli-agent",
-          "X-Title": "CLI Agent",
+          "HTTP-Referer": "https://github.com/spark",
+          "X-Title": "SPARK",
         },
       });
       return client(model);
@@ -192,8 +193,33 @@ export const providerRegistry: Record<ProviderName, ProviderDefinition> = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+import { config } from "../core/config";
+
+export function getAllProviders(): Record<string, ProviderDefinition> {
+  const merged = { ...builtinProviders };
+  for (const cp of config.customProviders || []) {
+    merged[cp.id] = {
+      id: cp.id,
+      label: cp.name,
+      defaultModel: cp.defaultModel,
+      models: [cp.defaultModel],
+      tokenLimit: 128000,
+      isCustom: true,
+      getApiKey: () => cp.apiKey || null,
+      createModel: (apiKey, model) => {
+        const client = createOpenAI({
+          apiKey: apiKey || "custom-key",
+          baseURL: cp.baseUrl,
+        });
+        return client(model);
+      },
+    };
+  }
+  return merged;
+}
+
 export function getProviderDefinition(provider: ProviderName): ProviderDefinition {
-  const def = providerRegistry[provider];
+  const def = getAllProviders()[provider];
   if (!def) {
     throw new Error(`Unknown provider: ${provider}`);
   }
@@ -216,6 +242,6 @@ export function isKnownModel(provider: ProviderName, model: string): boolean {
   return getModelsForProvider(provider).includes(model);
 }
 
-export function getApiKeyForProvider(provider: ProviderName, config: Config): string | null {
-  return getProviderDefinition(provider).getApiKey(config);
+export function getApiKeyForProvider(provider: ProviderName, cfg: Config): string | null {
+  return getProviderDefinition(provider).getApiKey(cfg);
 }

@@ -9,37 +9,73 @@ interface ProviderMenuProps {
   currentProviderId: ProviderName;
 }
 
-export const PROVIDER_LIST = [
-  {
-    id: "nvidia" as ProviderName,
-    label: "NVIDIA NIM",
-    defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
-    hasKey: () => config.nvidiaApiKey !== null,
-  },
-  {
-    id: "openrouter" as ProviderName,
-    label: "OpenRouter",
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-    hasKey: () => config.openrouterApiKey !== null,
-  },
-  {
-    id: "groq" as ProviderName,
-    label: "Groq",
-    defaultBaseUrl: "https://api.groq.com/openai/v1",
-    hasKey: () => config.groqApiKey !== null,
-  },
-  {
-    id: "opencodezen" as ProviderName,
-    label: "OpenCode Zen",
-    defaultBaseUrl: "https://opencode.ai/zen/v1",
-    hasKey: () => config.opencodezenApiKey !== null,
-  },
-];
+export function getProviderList() {
+  const builtin = [
+    {
+      id: "nvidia",
+      label: "NVIDIA NIM",
+      defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
+      hasKey: () => config.nvidiaApiKey !== null,
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      defaultBaseUrl: "https://openrouter.ai/api/v1",
+      hasKey: () => config.openrouterApiKey !== null,
+    },
+    {
+      id: "groq",
+      label: "Groq",
+      defaultBaseUrl: "https://api.groq.com/openai/v1",
+      hasKey: () => config.groqApiKey !== null,
+    },
+    {
+      id: "opencodezen",
+      label: "OpenCode Zen",
+      defaultBaseUrl: "https://opencode.ai/zen/v1",
+      hasKey: () => config.opencodezenApiKey !== null,
+    },
+  ];
+
+  const custom = (config.customProviders || []).map((p) => ({
+    id: p.id,
+    label: p.name,
+    defaultBaseUrl: p.baseUrl,
+    hasKey: () => !!p.apiKey,
+  }));
+
+  const actions = [
+    {
+      id: "__add_custom__",
+      label: "[+] Add Custom Provider",
+      defaultBaseUrl: "",
+      hasKey: () => true,
+    }
+  ];
+
+  for (const p of (config.customProviders || [])) {
+    actions.push({
+      id: `__edit_custom__:${p.id}`,
+      label: `[✎] Edit ${p.name}`,
+      defaultBaseUrl: "",
+      hasKey: () => true,
+    });
+    actions.push({
+      id: `__delete_custom__:${p.id}`,
+      label: `[✖] Delete ${p.name}`,
+      defaultBaseUrl: "",
+      hasKey: () => true,
+    });
+  }
+
+  return [...builtin, ...custom, ...actions];
+}
 
 export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuProps) {
+  const providerList = getProviderList();
   const leftColWidth = Math.max(
     30,
-    ...PROVIDER_LIST.map((p, i) => p.label.length + String(i + 1).length + 8)
+    ...providerList.map((p, i) => p.label.length + String(i + 1).length + 8)
   );
 
   return (
@@ -49,7 +85,7 @@ export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuP
         <Text dimColor>Switch between AI providers. Applies to this session.</Text>
       </Box>
 
-      {PROVIDER_LIST.map((p, idx) => {
+      {providerList.map((p, idx) => {
         const isSelected = idx === selectedIndex;
         const isCurrent = p.id === currentProviderId;
         const hasKey = p.hasKey();
@@ -70,12 +106,16 @@ export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuP
               </Text>
             </Box>
             <Box>
-              <Text color={isSelected ? "black" : statusColor} dimColor={!isSelected && !hasKey}>
-                {statusText}
-              </Text>
-              <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Gray} dimColor={!isSelected}>
-                {` · default base: ${p.defaultBaseUrl}`}
-              </Text>
+              {p.defaultBaseUrl ? (
+                <>
+                  <Text color={isSelected ? "black" : statusColor} dimColor={!isSelected && !hasKey}>
+                    {statusText}
+                  </Text>
+                  <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Gray} dimColor={!isSelected}>
+                    {` · default base: ${p.defaultBaseUrl}`}
+                  </Text>
+                </>
+              ) : null}
             </Box>
           </Box>
         );

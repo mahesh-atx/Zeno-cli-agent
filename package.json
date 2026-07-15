@@ -1,10 +1,10 @@
 {
-  "name": "cli-agent",
+  "name": "spark",
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "cli-agent": "./dist/index.js"
+    "spark": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup",

@@ -10,13 +10,14 @@ import { ToolOutput } from "./ToolOutput";
 import type { ChatMessage } from "./MessageItem";
 import type { ToolCall, ToolStatus } from "./ToolOutput";
 import type { PendingPermission } from "./PermissionPrompt";
-import type { ProviderName } from "../core/config";
-import { config } from "../core/config";
+import type { ProviderName, CustomProviderProfile } from "../core/config";
+import { config, saveCustomProvider, deleteCustomProvider } from "../core/config";
 import { Conversation } from "../core/conversation";
 import { runAgent, getToolResultSummary } from "../core/agent";
 import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
 import { QuestionPrompt } from "./QuestionPrompt";
+import { ProviderForm } from "./ProviderForm";
 import { themeManager } from "../themes/theme-manager";
 import { Colors } from "../themes/colors";
 import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
@@ -162,6 +163,7 @@ export function App() {
     options?: string[] 
   } | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<{ isNew: boolean, profile?: CustomProviderProfile } | null>(null);
   type AgentStatus =
     | "idle"
     | "running"
@@ -824,13 +826,15 @@ export function App() {
         <Box marginTop={1} flexDirection="column">
           <InputBar
             onSubmit={handleSubmit}
-            isDisabled={isLoading || pendingPermission !== null || pendingQuestion !== null || agentStatus === "retrying" || agentStatus === "rate_limited"}
+            isDisabled={isLoading || pendingPermission !== null || pendingQuestion !== null || agentStatus === "retrying" || agentStatus === "rate_limited" || editingProvider !== null}
             placeholder={
-              pendingQuestion 
-                ? "Waiting for question response..." 
-                : pendingPermission
-                  ? "Waiting for permission response..."
-                  : 'Try "read package.json" or @src/index.ts'
+              editingProvider
+                ? "Managing custom provider..."
+                : pendingQuestion 
+                  ? "Waiting for question response..." 
+                  : pendingPermission
+                    ? "Waiting for permission response..."
+                    : 'Try "read package.json" or @src/index.ts'
             }
               networkDropped={networkDropped}
               currentProviderId={currentProvider}
@@ -838,9 +842,22 @@ export function App() {
               currentThemeName={themeManager.getActiveTheme().name}
               contextSummary={contextManagerRef.current.getSummary(conversationRef.current.getHistoryTokens())}
               onProviderConfirm={(provider) => {
-                setCurrentProvider(provider);
-                contextManagerRef.current.setProvider(provider);
-                pushNotice(`Switched provider to ${provider}`);
+                if (provider === "__add_custom__") {
+                  setEditingProvider({ isNew: true });
+                } else if (provider.startsWith("__edit_custom__:")) {
+                  const id = provider.split(":")[1];
+                  const profile = config.customProviders?.find((p) => p.id === id);
+                  if (profile) setEditingProvider({ isNew: false, profile });
+                } else if (provider.startsWith("__delete_custom__:")) {
+                  const id = provider.split(":")[1];
+                  deleteCustomProvider(id);
+                  pushNotice(`Deleted custom provider: ${id}`);
+                  if (currentProvider === id) setCurrentProvider("openrouter"); // fallback
+                } else {
+                  setCurrentProvider(provider);
+                  contextManagerRef.current.setProvider(provider);
+                  pushNotice(`Switched provider to ${provider}`);
+                }
               }}
               onModelConfirm={(model) => {
                 setCurrentModel(model);
@@ -859,6 +876,20 @@ export function App() {
               <Box marginX={0} marginTop={1}>
                 <PermissionPrompt permission={pendingPermission} />
               </Box>
+            )}
+
+            {editingProvider && (
+              <ProviderForm
+                initialProfile={editingProvider.profile}
+                onSave={(profile) => {
+                  saveCustomProvider(profile);
+                  pushNotice(editingProvider.isNew ? `Added custom provider: ${profile.name}` : `Updated custom provider: ${profile.name}`);
+                  setCurrentProvider(profile.id);
+                  contextManagerRef.current.setProvider(profile.id);
+                  setEditingProvider(null);
+                }}
+                onCancel={() => setEditingProvider(null)}
+              />
             )}
 
             {pendingQuestion && (

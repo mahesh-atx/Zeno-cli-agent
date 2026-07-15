@@ -18,9 +18,9 @@ const args = process.argv.slice(2);
 
 function printHelp() {
   console.log(`
-Zeno CLI Agent — AI coding assistant
+SPARK — AI coding assistant
 
-Usage: cli-agent [options]
+Usage: spark [options]
 
 Options:
   --help, -h          Show this help
@@ -52,7 +52,7 @@ Environment:
   DEBUG=1, YES_TO_ALL=1, ALLOW_OUTSIDE_CWD=1
 
 Config file (P2):
-  ~/.config/cli-agent/config.json or .cli-agent/config.json
+  ~/.config/spark/config.json or .spark/config.json
   {
     "defaultProvider": "openrouter",
     "defaultModel": "poolside/laguna-m.1:free",
@@ -63,9 +63,9 @@ Config file (P2):
   }
 
 Examples:
-  cli-agent
-  cli-agent --yes
-  cli-agent --provider groq --model llama-3.3-70b-versatile
+  spark
+  spark --yes
+  spark --provider groq --model llama-3.3-70b-versatile
 `);
 }
 
@@ -82,13 +82,13 @@ function printVersion() {
     for (const p of altPaths) {
       if (fs.existsSync(p)) {
         const pkg = JSON.parse(fs.readFileSync(p, "utf-8"));
-        console.log(`${pkg.name || "cli-agent"} v${pkg.version || "1.0.0"}`);
+        console.log(`${pkg.name || "spark"} v${pkg.version || "1.0.0"}`);
         return;
       }
     }
-    console.log("cli-agent v1.0.0");
+    console.log("spark v1.0.0");
   } catch {
-    console.log("cli-agent v1.0.0");
+    console.log("spark v1.0.0");
   }
 }
 

@@ -7,7 +7,7 @@ import { COMMAND_META } from "../commands";
 import type { CommandMeta } from "../commands";
 import { searchFiles, getFileList } from "../utils/fileSearch";
 import type { FileEntry } from "../utils/fileSearch";
-import { ProviderMenu, PROVIDER_LIST } from "./ProviderMenu";
+import { ProviderMenu, getProviderList } from "./ProviderMenu";
 import { ModelMenu } from "./ModelMenu";
 import { ThemeMenu } from "./ThemeMenu";
 import { StatusMenu } from "./StatusMenu";
@@ -226,7 +226,8 @@ export function InputBar({
       if (isDisabled) return;
 
       if (showProviderPicker) {
-        const len = PROVIDER_LIST.length;
+        const providerList = getProviderList();
+        const len = providerList.length;
         if (key.upArrow) {
           if (len > 0) setSelectedIndex((prev) => (prev - 1 + len) % len);
           return;
@@ -242,7 +243,7 @@ export function InputBar({
         }
         if (key.return) {
           if (len > 0) {
-            const p = PROVIDER_LIST[Math.min(selectedIndex, len - 1)];
+            const p = providerList[Math.min(selectedIndex, len - 1)];
             if (p) {
               setShowProviderPicker(false);
               setValue("");
@@ -560,7 +561,7 @@ export function InputBar({
           models={modelsForCurrentProvider}
           selectedIndex={selectedIndex}
           currentModelId={currentModelId}
-          providerLabel={PROVIDER_LIST.find((p) => p.id === currentProviderId)?.label ?? ""}
+          providerLabel={getProviderList().find((p) => p.id === currentProviderId)?.label ?? ""}
         />
       )}
       {showProviderPicker && (

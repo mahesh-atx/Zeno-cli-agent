@@ -5,7 +5,7 @@ import type { Message } from "../core/conversation";
 import type { AgentEvent } from "../errors/base";
 import { translateProviderError } from "../errors/apiErrors";
 import {
-  providerRegistry,
+  builtinProviders,
   TOKEN_LIMITS as REGISTRY_TOKEN_LIMITS,
   getProviderDefinition,
   getModelsForProvider as getModelsFromRegistry,
@@ -24,7 +24,7 @@ export {
   OPENCODEZEN_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL,
   TOKEN_LIMITS,
-  providerRegistry,
+  builtinProviders,
   getProviderDefinition,
 } from "./registry";
 
@@ -33,17 +33,17 @@ export interface StreamResult {
 }
 
 export const PROVIDER_MODELS: Record<ProviderName, readonly string[]> = {
-  openrouter: providerRegistry.openrouter.models,
-  groq: providerRegistry.groq.models,
-  nvidia: providerRegistry.nvidia.models,
-  opencodezen: providerRegistry.opencodezen.models,
+  openrouter: builtinProviders.openrouter.models,
+  groq: builtinProviders.groq.models,
+  nvidia: builtinProviders.nvidia.models,
+  opencodezen: builtinProviders.opencodezen.models,
 };
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderName, string> = {
-  openrouter: providerRegistry.openrouter.defaultModel,
-  groq: providerRegistry.groq.defaultModel,
-  nvidia: providerRegistry.nvidia.defaultModel,
-  opencodezen: providerRegistry.opencodezen.defaultModel,
+  openrouter: builtinProviders.openrouter.defaultModel,
+  groq: builtinProviders.groq.defaultModel,
+  nvidia: builtinProviders.nvidia.defaultModel,
+  opencodezen: builtinProviders.opencodezen.defaultModel,
 };
 
 export const PROVIDER_TOKEN_LIMITS: Record<ProviderName, number> = {
