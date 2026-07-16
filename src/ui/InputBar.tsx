@@ -565,32 +565,33 @@ export function InputBar({
         </Box>
       )}
 
-      {/* Input box styled like kode-cli or Spinner */}
-      {isLoading ? (
+      {/* Fixed Spinner (Anchored above input) */}
+      {isLoading && (
         <FixedSpinner 
           overrideVerb={isThinking ? "Thinking" : activeToolName ? `Running ${activeToolName}` : undefined} 
         />
-      ) : (
-        <Box
-          width="100%"
-          backgroundColor={Colors.InputBackground ?? Colors.DarkGray}
-        >
-          <Text color={Colors.AccentPurple} bold>
-            {" ❯ "}
-          </Text>
-          {value.length > 0 ? (
-            <Text color={Colors.Foreground}>
-              {value}
-              <Text color={Colors.AccentCyan}>{cursor}</Text>
-            </Text>
-          ) : (
-            <Text>
-              <Text color={Colors.AccentCyan}>{cursor}</Text>
-              <Text color={Colors.Gray}>{placeholder}</Text>
-            </Text>
-          )}
-        </Box>
       )}
+
+      {/* Input box styled like kode-cli */}
+      <Box
+        width="100%"
+        backgroundColor={Colors.InputBackground ?? Colors.DarkGray}
+      >
+        <Text color={Colors.AccentPurple} bold>
+          {" ❯ "}
+        </Text>
+        {value.length > 0 ? (
+          <Text color={Colors.Foreground}>
+            {value}
+            <Text color={Colors.AccentCyan}>{cursor}</Text>
+          </Text>
+        ) : (
+          <Text>
+            <Text color={Colors.AccentCyan}>{cursor}</Text>
+            <Text color={Colors.Gray}>{placeholder}</Text>
+          </Text>
+        )}
+      </Box>
 
       {/* Menus */}
       {showModelPicker && (
