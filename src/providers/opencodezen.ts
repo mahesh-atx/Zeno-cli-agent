@@ -5,7 +5,7 @@ import type { Config } from "../core/config";
 import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-import { providerRegistry, OPENCODEZEN_MODELS as REGISTRY_MODELS, OPENCODEZEN_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
+import { builtinProviders, OPENCODEZEN_MODELS as REGISTRY_MODELS, OPENCODEZEN_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
 export const OPENCODEZEN_MODELS = REGISTRY_MODELS;
 export const OPENCODEZEN_DEFAULT_MODEL = REGISTRY_DEFAULT;
@@ -16,7 +16,7 @@ export async function chatWithOpenCodeZen(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  const def = providerRegistry.opencodezen;
+  const def = builtinProviders.opencodezen;
   const apiKey = def.getApiKey(config);
   if (!apiKey) {
     return {

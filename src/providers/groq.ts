@@ -5,14 +5,14 @@ import type { Config } from "../core/config";
 import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-import { providerRegistry, GROQ_MODELS as REGISTRY_MODELS, GROQ_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
+import { builtinProviders, GROQ_MODELS as REGISTRY_MODELS, GROQ_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
 // Re-export canonical lists from registry
 export const GROQ_MODELS = REGISTRY_MODELS;
 export const GROQ_DEFAULT_MODEL = REGISTRY_DEFAULT;
 
 /**
- * @deprecated Use providerRegistry.groq.createModel via getProvider() in providers/index.ts
+ * @deprecated Use builtinProviders.groq.createModel via getProvider() in providers/index.ts
  * Kept for backward compat with old tests, now uses registry internally
  */
 export async function chatWithGroq(
@@ -21,7 +21,7 @@ export async function chatWithGroq(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  const def = providerRegistry.groq;
+  const def = builtinProviders.groq;
   const apiKey = def.getApiKey(config);
   if (!apiKey) {
     return {

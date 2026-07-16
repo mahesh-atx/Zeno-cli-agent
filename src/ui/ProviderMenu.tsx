@@ -4,12 +4,15 @@ import { config } from "../core/config";
 import type { ProviderName } from "../core/config";
 import { Colors } from "../themes/colors";
 
+export type ProviderMenuState = 'main' | 'activate' | 'edit' | 'delete';
+
 interface ProviderMenuProps {
   selectedIndex: number;
   currentProviderId: ProviderName;
+  menuState: ProviderMenuState;
 }
 
-export function getProviderList() {
+export function getProviderList(menuState: ProviderMenuState) {
   const builtin = [
     {
       id: "nvidia",
@@ -44,45 +47,64 @@ export function getProviderList() {
     hasKey: () => !!p.apiKey,
   }));
 
-  const actions = [
-    {
-      id: "__add_custom__",
-      label: "[+] Add Custom Provider",
-      defaultBaseUrl: "",
-      hasKey: () => true,
+  if (menuState === 'main') {
+    const actions = [
+      { id: "action:activate", label: "Set active provider", defaultBaseUrl: "", hasKey: () => true },
+      { id: "action:add", label: "Add custom provider", defaultBaseUrl: "", hasKey: () => true },
+    ];
+    if (custom.length > 0) {
+      actions.push({ id: "action:edit", label: "Edit custom provider", defaultBaseUrl: "", hasKey: () => true });
+      actions.push({ id: "action:delete", label: "Delete custom provider", defaultBaseUrl: "", hasKey: () => true });
     }
-  ];
-
-  for (const p of (config.customProviders || [])) {
-    actions.push({
-      id: `__edit_custom__:${p.id}`,
-      label: `[✎] Edit ${p.name}`,
-      defaultBaseUrl: "",
-      hasKey: () => true,
-    });
-    actions.push({
-      id: `__delete_custom__:${p.id}`,
-      label: `[✖] Delete ${p.name}`,
-      defaultBaseUrl: "",
-      hasKey: () => true,
-    });
+    return actions;
   }
 
-  return [...builtin, ...custom, ...actions];
+  if (menuState === 'activate') {
+    return [...builtin, ...custom];
+  }
+
+  if (menuState === 'edit') {
+    return custom.map(p => ({
+      ...p,
+      id: `__edit_custom__:${p.id}`
+    }));
+  }
+
+  if (menuState === 'delete') {
+    return custom.map(p => ({
+      ...p,
+      id: `__delete_custom__:${p.id}`
+    }));
+  }
+
+  return [];
 }
 
-export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuProps) {
-  const providerList = getProviderList();
+export function ProviderMenu({ selectedIndex, currentProviderId, menuState }: ProviderMenuProps) {
+  const providerList = getProviderList(menuState);
   const leftColWidth = Math.max(
     30,
     ...providerList.map((p, i) => p.label.length + String(i + 1).length + 8)
   );
 
+  let title = "Provider Options";
+  let subtitle = "Select an action";
+  if (menuState === 'activate') {
+    title = "Select provider";
+    subtitle = "Switch between AI providers. Applies to this session.";
+  } else if (menuState === 'edit') {
+    title = "Edit custom provider";
+    subtitle = "Select a provider to edit its settings.";
+  } else if (menuState === 'delete') {
+    title = "Delete custom provider";
+    subtitle = "Select a provider to delete permanently.";
+  }
+
   return (
     <Box flexDirection="column" width="100%">
       <Box paddingX={1} flexDirection="column" marginBottom={1}>
-        <Text color={Colors.AccentYellow} bold>Select provider</Text>
-        <Text dimColor>Switch between AI providers. Applies to this session.</Text>
+        <Text color={Colors.AccentYellow} bold>{title}</Text>
+        <Text dimColor>{subtitle}</Text>
       </Box>
 
       {providerList.map((p, idx) => {
@@ -102,7 +124,7 @@ export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuP
           >
             <Box width={leftColWidth}>
               <Text color={isSelected ? (Colors.FocusColor ?? Colors.Background) : Colors.Foreground} bold={isSelected}>
-                {isSelected ? "❯ " : "  "}{idx + 1}. {p.label}{isCurrent ? " ✔" : ""}
+                {isSelected ? "❯ " : "  "}{idx + 1}. {p.label}{isCurrent && menuState === 'activate' ? " ✔" : ""}
               </Text>
             </Box>
             <Box>
@@ -122,7 +144,7 @@ export function ProviderMenu({ selectedIndex, currentProviderId }: ProviderMenuP
       })}
 
       <Box paddingX={1} marginTop={1}>
-        <Text dimColor>Enter to confirm · Esc to exit</Text>
+        <Text dimColor>Enter to confirm · Esc to {menuState === 'main' ? 'exit' : 'go back'}</Text>
       </Box>
     </Box>
   );

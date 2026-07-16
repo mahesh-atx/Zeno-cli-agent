@@ -4,7 +4,7 @@ import type { Message } from "../core/conversation";
 import type { Config } from "../core/config";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-import { providerRegistry, OPENROUTER_MODELS as REGISTRY_MODELS, OPENROUTER_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
+import { builtinProviders, OPENROUTER_MODELS as REGISTRY_MODELS, OPENROUTER_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
 export interface StreamResult {
   stream: AsyncIterable<string>;
@@ -19,7 +19,7 @@ export async function chatWithOpenRouter(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  const def = providerRegistry.openrouter;
+  const def = builtinProviders.openrouter;
   const apiKey = def.getApiKey(config);
   if (!apiKey) {
     return {

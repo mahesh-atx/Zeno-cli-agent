@@ -8,6 +8,7 @@ import type { CommandMeta } from "../commands";
 import { searchFiles, getFileList } from "../utils/fileSearch";
 import type { FileEntry } from "../utils/fileSearch";
 import { ProviderMenu, getProviderList } from "./ProviderMenu";
+import type { ProviderMenuState } from "./ProviderMenu";
 import { ModelMenu } from "./ModelMenu";
 import { ThemeMenu } from "./ThemeMenu";
 import { StatusMenu } from "./StatusMenu";
@@ -108,6 +109,7 @@ export function InputBar({
   const [menuClosed, setMenuClosed] = useState(false);
   
   const [showProviderPicker, setShowProviderPicker] = useState(false);
+  const [providerMenuState, setProviderMenuState] = useState<ProviderMenuState>('main');
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -226,7 +228,7 @@ export function InputBar({
       if (isDisabled) return;
 
       if (showProviderPicker) {
-        const providerList = getProviderList();
+        const providerList = getProviderList(providerMenuState);
         const len = providerList.length;
         if (key.upArrow) {
           if (len > 0) setSelectedIndex((prev) => (prev - 1 + len) % len);
@@ -237,17 +239,39 @@ export function InputBar({
           return;
         }
         if (key.escape) {
-          setShowProviderPicker(false);
-          setValue("");
+          if (providerMenuState !== 'main') {
+            setProviderMenuState('main');
+            setSelectedIndex(0);
+          } else {
+            setShowProviderPicker(false);
+            setValue("");
+          }
           return;
         }
         if (key.return) {
           if (len > 0) {
             const p = providerList[Math.min(selectedIndex, len - 1)];
             if (p) {
-              setShowProviderPicker(false);
-              setValue("");
-              onProviderConfirm(p.id);
+              if (p.id === 'action:activate') {
+                setProviderMenuState('activate');
+                setSelectedIndex(0);
+              } else if (p.id === 'action:add') {
+                setShowProviderPicker(false);
+                setProviderMenuState('main');
+                setValue("");
+                onProviderConfirm('__add_custom__');
+              } else if (p.id === 'action:edit') {
+                setProviderMenuState('edit');
+                setSelectedIndex(0);
+              } else if (p.id === 'action:delete') {
+                setProviderMenuState('delete');
+                setSelectedIndex(0);
+              } else {
+                setShowProviderPicker(false);
+                setProviderMenuState('main');
+                setValue("");
+                onProviderConfirm(p.id);
+              }
             }
           }
           return;
@@ -565,7 +589,7 @@ export function InputBar({
         />
       )}
       {showProviderPicker && (
-        <ProviderMenu selectedIndex={selectedIndex} currentProviderId={currentProviderId} />
+        <ProviderMenu selectedIndex={selectedIndex} currentProviderId={currentProviderId} menuState={providerMenuState} />
       )}
       {showThemePicker && (
         <ThemeMenu selectedIndex={selectedIndex} />

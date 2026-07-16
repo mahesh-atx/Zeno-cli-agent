@@ -904,7 +904,7 @@ export function App() {
             )}
           </Box>
 
-        {!isMenuOpen && !pendingQuestion && !pendingPermission && (
+        {!isMenuOpen && !pendingQuestion && !pendingPermission && !editingProvider && (
           <StatusLine
             provider={currentProvider}
             model={currentModel}

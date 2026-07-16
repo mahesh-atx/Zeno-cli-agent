@@ -5,7 +5,7 @@ import type { Config } from "../core/config";
 import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
-import { providerRegistry, NVIDIA_MODELS as REGISTRY_MODELS, NVIDIA_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
+import { builtinProviders, NVIDIA_MODELS as REGISTRY_MODELS, NVIDIA_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
 export const NVIDIA_MODELS = REGISTRY_MODELS;
 export const NVIDIA_DEFAULT_MODEL = REGISTRY_DEFAULT;
@@ -16,7 +16,7 @@ export async function chatWithNvidia(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  const def = providerRegistry.nvidia;
+  const def = builtinProviders.nvidia;
   const apiKey = def.getApiKey(config);
   if (!apiKey) {
     return {
