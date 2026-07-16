@@ -20,14 +20,7 @@ const MAX_PREVIEW_LINES = 12;
 
 export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePreviewProps) {
   if (thinkingOnly) {
-    return (
-      <Box marginTop={1} paddingX={0}>
-        <Text color={Colors.AccentYellow}>
-          <Spinner type="dots" />
-        </Text>
-        <Text color={Colors.AccentYellow} bold> Thinking...</Text>
-      </Box>
-    );
+    return null; // Spinner is now handled globally in App.tsx
   }
 
   if (activeTool) {
@@ -48,18 +41,14 @@ export function LivePreview({ text, activeTool, thinkingOnly, hideIcon }: LivePr
 
   return (
     <Box marginTop={hideIcon ? 0 : 1} paddingX={0} flexDirection="column">
-      <Box>
-        <Text color={Colors.AccentYellow}>
-          <Spinner type="dots" />
-        </Text>
-        <Text color={Colors.AccentYellow} bold> Streaming...</Text>
-        <Text color={Colors.Gray} dimColor>
-          {hasOverflow
-            ? ` (showing last ${MAX_PREVIEW_LINES} of ${rawLines.length} lines)`
-            : ""}
-        </Text>
-      </Box>
-      <Box flexDirection="column" marginLeft={2}>
+      {hasOverflow && (
+        <Box>
+          <Text color={Colors.Gray} dimColor>
+            (showing last {MAX_PREVIEW_LINES} of {rawLines.length} lines)
+          </Text>
+        </Box>
+      )}
+      <Box flexDirection="column" marginLeft={0}>
         <Ansi wrap="wrap">
           {rendered}
           {"\u258a"}

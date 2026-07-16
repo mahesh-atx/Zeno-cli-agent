@@ -805,9 +805,7 @@ export function App() {
           />
         )}
 
-        {isLoading && !showLive && agentStatus !== "retrying" && agentStatus !== "rate_limited" && agentStatus !== "network_dropped" && agentStatus !== "fatal_error" && (
-          <LivePreview text="" activeTool={null} thinkingOnly />
-        )}
+        {/* Removed LivePreview thinkingOnly block as it is now handled by FixedSpinner in InputBar */}
 
         {agentStatus === "retrying" && (
           <Box marginLeft={3} marginTop={1}>
@@ -825,6 +823,9 @@ export function App() {
 
         <Box marginTop={1} flexDirection="column">
           <InputBar
+            isLoading={isLoading}
+            isThinking={isLoading && !showLive && agentStatus !== "retrying" && agentStatus !== "rate_limited" && agentStatus !== "network_dropped" && agentStatus !== "fatal_error"}
+            activeToolName={livePreview.activeTool?.name}
             onSubmit={handleSubmit}
             isDisabled={isLoading || pendingPermission !== null || pendingQuestion !== null || agentStatus === "retrying" || agentStatus === "rate_limited" || editingProvider !== null}
             placeholder={

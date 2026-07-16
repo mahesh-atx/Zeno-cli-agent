@@ -12,6 +12,7 @@ import type { ProviderMenuState } from "./ProviderMenu";
 import { ModelMenu } from "./ModelMenu";
 import { ThemeMenu } from "./ThemeMenu";
 import { StatusMenu } from "./StatusMenu";
+import { FixedSpinner } from "./FixedSpinner";
 import type { ProviderName } from "../core/config";
 import type { ContextSummary } from "../core/context";
 import { getModelsForProvider } from "../providers";
@@ -34,6 +35,9 @@ interface InputBarProps {
   onThemeConfirm: (themeName: string) => void;
   onRemoveFile: (filePath: string) => void;
   onMenuStateChange?: (isOpen: boolean) => void;
+  isLoading?: boolean;
+  isThinking?: boolean;
+  activeToolName?: string | null;
 }
 
 // ─── Slash command fuzzy index ────────────────────────────────────────────────
@@ -103,6 +107,9 @@ export function InputBar({
   onThemeConfirm,
   onRemoveFile,
   onMenuStateChange,
+  isLoading,
+  isThinking,
+  activeToolName,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -558,26 +565,32 @@ export function InputBar({
         </Box>
       )}
 
-      {/* Input box styled like kode-cli */}
-      <Box
-        width="100%"
-        backgroundColor={Colors.InputBackground ?? Colors.DarkGray}
-      >
-        <Text color={Colors.AccentPurple} bold>
-          {" ❯ "}
-        </Text>
-        {value.length > 0 ? (
-          <Text color={Colors.Foreground}>
-            {value}
-            <Text color={Colors.AccentCyan}>{cursor}</Text>
+      {/* Input box styled like kode-cli or Spinner */}
+      {isLoading ? (
+        <FixedSpinner 
+          overrideVerb={isThinking ? "Thinking" : activeToolName ? `Running ${activeToolName}` : undefined} 
+        />
+      ) : (
+        <Box
+          width="100%"
+          backgroundColor={Colors.InputBackground ?? Colors.DarkGray}
+        >
+          <Text color={Colors.AccentPurple} bold>
+            {" ❯ "}
           </Text>
-        ) : (
-          <Text>
-            <Text color={Colors.AccentCyan}>{cursor}</Text>
-            <Text color={Colors.Gray}>{placeholder}</Text>
-          </Text>
-        )}
-      </Box>
+          {value.length > 0 ? (
+            <Text color={Colors.Foreground}>
+              {value}
+              <Text color={Colors.AccentCyan}>{cursor}</Text>
+            </Text>
+          ) : (
+            <Text>
+              <Text color={Colors.AccentCyan}>{cursor}</Text>
+              <Text color={Colors.Gray}>{placeholder}</Text>
+            </Text>
+          )}
+        </Box>
+      )}
 
       {/* Menus */}
       {showModelPicker && (
