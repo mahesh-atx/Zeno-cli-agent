@@ -585,7 +585,7 @@ export function InputBar({
           models={modelsForCurrentProvider}
           selectedIndex={selectedIndex}
           currentModelId={currentModelId}
-          providerLabel={getProviderList().find((p) => p.id === currentProviderId)?.label ?? ""}
+          providerLabel={getProviderList('activate').find((p) => p.id === currentProviderId)?.label ?? ""}
         />
       )}
       {showProviderPicker && (
