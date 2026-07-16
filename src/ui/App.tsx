@@ -825,7 +825,7 @@ export function App() {
           <InputBar
             isLoading={isLoading}
             isThinking={isLoading && !showLive && agentStatus !== "retrying" && agentStatus !== "rate_limited" && agentStatus !== "network_dropped" && agentStatus !== "fatal_error"}
-            activeToolName={livePreview.activeTool?.name}
+            activeToolName={livePreview.activeTool?.toolName}
             onSubmit={handleSubmit}
             isDisabled={isLoading || pendingPermission !== null || pendingQuestion !== null || agentStatus === "retrying" || agentStatus === "rate_limited" || editingProvider !== null}
             placeholder={
