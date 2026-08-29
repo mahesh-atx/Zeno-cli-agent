@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Box, Static, useInput, useApp } from "ink";
+import { Box, Text, Static, useInput, useApp } from "ink";
 import { WelcomeBanner } from "./WelcomeBanner";
 import { LivePreview } from "./LivePreview";
 import { InputBar } from "./InputBar";
@@ -18,6 +18,7 @@ import { formatTokenCount } from "../utils/tokens";
 import { ContextManager } from "../core/context";
 import { QuestionPrompt } from "./QuestionPrompt";
 import { themeManager } from "../themes/theme-manager";
+import { Colors } from "../themes/colors";
 import type { AgentEvent, RateLimitEvent, NetworkEvent } from "../errors/base";
 import { 
   isAuthEvent, 
@@ -32,13 +33,8 @@ import {
   dispatchCommand,
   type CommandContext,
 } from "../commands";
-
-const TOKEN_LIMITS: Record<ProviderName, number> = {
-  openrouter: 128000,
-  groq: 32768,
-  nvidia: 128000,
-  opencodezen: 128000,
-};
+import { TOKEN_LIMITS } from "../providers/registry";
+import { parseAtMentions } from "../utils/atMention";
 
 let idCounter = 0;
 const nextId = () => `msg-${++idCounter}`;
@@ -57,45 +53,88 @@ const LIVE_UPDATE_MS = 60;
 
 /**
  * Find the longest flushable prefix of `buf` that ends at a paragraph break
- * AND is outside any open code fence (``` ... ```). Flushing inside a code
- * block would split it mid-fence and break markdown rendering of the first
- * chunk (an unclosed fence leaks styling into the prose that follows).
- *
- * Returns the number of characters safe to flush (0 = keep buffering).
+ * AND is outside any open code fence. Optimized to avoid O(n^2) on large buffers.
  */
 function findFlushBoundary(buf: string): number {
+  // Quick exit: no paragraph break at all
+  if (!buf.includes(PARAGRAPH_BREAK)) return 0;
+  // Only look at last 4000 chars for break to avoid scanning huge buffer repeatedly
+  // But we still need fence state from start up to break, so count fences efficiently
   const breakIdx = buf.lastIndexOf(PARAGRAPH_BREAK);
   if (breakIdx < 0) return 0;
-  // Walk line-by-line up to the break; track open fence state.
+
+  // Efficient fence count: count occurrences of ``` or ~~~ at line starts up to break
   const upto = buf.slice(0, breakIdx);
-  const lines = upto.split("\n");
-  let inFence = false;
-  for (const line of lines) {
-    if (/^\s{0,3}(```|~~~)/.test(line)) inFence = !inFence;
-  }
-  if (inFence) return 0; // still inside an unclosed code block
+  const fenceMatches = upto.match(/^\s{0,3}(```|~~~)/gm);
+  const fenceCount = fenceMatches ? fenceMatches.length : 0;
+  if (fenceCount % 2 === 1) return 0; // inside unclosed fence
+
   return breakIdx + PARAGRAPH_BREAK.length;
 }
 
-// Hard-cap fallback: flush at the last newline that is *outside* a code fence
-// so we never split a fenced block mid-stream.
+// Hard-cap fallback: optimized to avoid full split every token
 function findHardCapBoundary(buf: string): number {
+  if (buf.length <= MAX_LIVE_CHARS) return -1;
+
+  // Scan lines but track fence state; we want last safe newline outside fence
+  // Use regex to iterate lines without splitting entire huge string twice
   let inFence = false;
-  let safe = -1;
+  let lastSafePos = -1;
+  let pos = 0;
+
+  // Iterate via line boundaries using indexOf
   const lines = buf.split("\n");
-  let consumed = 0;
+  // But split is still O(n); we limit to first pass that is bounded
+  // For very large buffers (>10k), we cap scan to last MAX_LIVE_CHARS*2 region for performance
+  // and compute fence state for prefix separately
+
+  // Fast path: if buffer is huge (>5000), compute fence state for prefix up to length - MAX_LIVE_CHARS
+  // then scan only tail
+  if (buf.length > 5000) {
+    const prefix = buf.slice(0, buf.length - MAX_LIVE_CHARS * 2);
+    const prefixFences = prefix.match(/^\s{0,3}(```|~~~)/gm);
+    inFence = (prefixFences ? prefixFences.length : 0) % 2 === 1;
+    // Scan only tail
+    const tail = buf.slice(buf.length - MAX_LIVE_CHARS * 2);
+    const tailLines = tail.split("\n");
+    let tailPos = buf.length - tail.length;
+    for (let i = 0; i < tailLines.length; i++) {
+      const line = tailLines[i];
+      const startsFence = /^\s{0,3}(```|~~~)/.test(line);
+      if (!inFence) {
+        lastSafePos = tailPos + line.length + (i < tailLines.length - 1 ? 1 : 0);
+      }
+      if (startsFence) inFence = !inFence;
+      tailPos += line.length + 1;
+    }
+    // If no safe pos in tail but we are outside fence somewhere, allow hard cut at MAX_LIVE_CHARS
+    if (lastSafePos === -1 && !inFence) {
+      return MAX_LIVE_CHARS;
+    }
+    // If entirely inside fence in tail, still force cut to avoid unbounded growth (P1 fix)
+    if (lastSafePos === -1 && inFence && buf.length > MAX_LIVE_CHARS * 3) {
+      return MAX_LIVE_CHARS;
+    }
+    return lastSafePos > 0 ? lastSafePos : -1;
+  }
+
+  // Normal path for moderate buffers
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lineLen = line.length + (i < lines.length - 1 ? 1 : 0);
     const startsFence = /^\s{0,3}(```|~~~)/.test(line);
-    // A position is safe to cut at the END of a line only when we are NOT
-    // currently inside a fence (cutting right at the closing fence is fine
-    // because inFence flips to false after processing it).
-    if (!inFence) safe = consumed + lineLen;
+    if (!inFence) {
+      lastSafePos = pos + line.length + (i < lines.length - 1 ? 1 : 0);
+    }
     if (startsFence) inFence = !inFence;
-    consumed += lineLen;
+    pos += line.length + 1;
   }
-  return safe; // -1 if nowhere safe (entirely inside a fence)
+
+  // If entirely inside fence and buffer huge, force cut to avoid O(n^2) growth
+  if (lastSafePos === -1 && buf.length > MAX_LIVE_CHARS * 2) {
+    return MAX_LIVE_CHARS;
+  }
+
+  return lastSafePos;
 }
 
 export function App() {
@@ -103,7 +142,6 @@ export function App() {
 
   const [completedMessages, setCompletedMessages] = useState<ChatMessage[]>([]);
 
-  // Live preview state — small, throttled, capped in height
   const [livePreview, setLivePreview] = useState<{
     text: string;
     activeTool: ToolCall | null;
@@ -124,8 +162,6 @@ export function App() {
     options?: string[] 
   } | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-    // ━━━ Error system state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // agentStatus drives what the UI shows during/after the loop
   type AgentStatus =
     | "idle"
     | "running"
@@ -135,16 +171,10 @@ export function App() {
     | "fatal_error";
 
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
-  // Countdown remaining ms for rate limit display
   const [rateLimitMs, setRateLimitMs] = useState<number | null>(null);
-  // Whether user can press R to retry (network drop state)
   const [networkDropped, setNetworkDropped] = useState(false);
-  // Retry attempt counter shown in status
   const [retryAttempt, setRetryAttempt] = useState(0);
 
-  // retrySignal — a shared mutable ref the agent polls
-  // We use a ref (not state) so the polling loop sees the latest value
-  // without causing re-renders on every poll tick.
   const retryPressedRef = useRef(false);
   const retrySignal = {
     shouldRetry: () => retryPressedRef.current,
@@ -152,31 +182,45 @@ export function App() {
   };
   const conversationRef = useRef(new Conversation());
   const contextManagerRef = useRef(new ContextManager(config.defaultProvider));
-  // Keep latest submit handler for /retry without circular useCallback deps
   const handleSubmitRef = useRef<(input: string) => Promise<void>>(async () => {});
-  // Last non-command user input (for /retry)
   const lastUserInputRef = useRef<string | null>(null);
-  // Latest provider/model for CommandContext without stale closures
   const currentProviderRef = useRef(currentProvider);
   const currentModelRef = useRef(currentModel);
   currentProviderRef.current = currentProvider;
   currentModelRef.current = currentModel;
 
-  // Buffer of in-flight assistant text (committed text not yet flushed)
   const streamBufferRef = useRef<string>("");
-  // The complete assistant response so far (for conversation history)
   const fullResponseRef = useRef<string>("");
-  // Throttle timer + pending flag
   const lastUpdateRef = useRef<number>(0);
   const pendingUpdateRef = useRef<NodeJS.Timeout | null>(null);
-  // Active tools by id
   const activeToolCallsRef = useRef(new Map<string, ToolCall>());
-  // Currently-running tool (the one we render live)
   const currentToolIdRef = useRef<string | null>(null);
   const isFirstChunkRef = useRef<boolean>(true);
 
   const pushCompleted = useCallback((msg: ChatMessage) => {
-    setCompletedMessages((prev) => [...prev, msg]);
+    setCompletedMessages((prev) => {
+      if (
+        msg.role === "assistant" &&
+        !msg.content &&
+        msg.toolCalls &&
+        msg.toolCalls.every(tc => tc.toolName === "read_file")
+      ) {
+        const last = prev.length > 0 ? prev[prev.length - 1] : null;
+        if (
+          last &&
+          last.role === "assistant" &&
+          !last.content &&
+          last.toolCalls &&
+          last.toolCalls.every(tc => tc.toolName === "read_file")
+        ) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, toolCalls: [...last.toolCalls, ...msg.toolCalls] }
+          ];
+        }
+      }
+      return [...prev, msg];
+    });
   }, []);
 
   const pushNotice = useCallback(
@@ -202,8 +246,6 @@ export function App() {
     },
     [pushCompleted, pushNotice]
   );
-
-  // ─── Live preview update (throttled) ────────────────────────────────────────
 
   const scheduleLiveUpdate = useCallback(() => {
     const now = Date.now();
@@ -238,13 +280,10 @@ export function App() {
     }, LIVE_UPDATE_MS - since);
   }, []);
 
-  // ─── Flush completed paragraphs out of the buffer into <Static> ─────────────
-
   const flushParagraphs = useCallback(() => {
     let buf = streamBufferRef.current;
     let didFlush = false;
 
-    // Flush every complete paragraph (\n\n) — but never inside a code fence.
     let cut = findFlushBoundary(buf);
     while (cut > 0) {
       const chunk = buf.slice(0, cut);
@@ -263,9 +302,6 @@ export function App() {
       cut = findFlushBoundary(buf);
     }
 
-    // Hard cap: if buffer is too long even without a paragraph break, flush
-    // at the last newline that is outside any code fence (or hold off if the
-    // whole buffer is one big fenced block).
     if (buf.length > MAX_LIVE_CHARS) {
       const safe = findHardCapBoundary(buf);
       if (safe > 0) {
@@ -289,7 +325,6 @@ export function App() {
     return didFlush;
   }, [pushCompleted]);
 
-  // Force-flush everything left in the buffer (end of response)
   const flushAll = useCallback(() => {
     if (pendingUpdateRef.current) {
       clearTimeout(pendingUpdateRef.current);
@@ -308,8 +343,6 @@ export function App() {
     }
     streamBufferRef.current = "";
   }, [pushCompleted]);
-
-  // ─── Permission Handler ─────────────────────────────────────────────────────
 
   const requestPermission = useCallback(
     (
@@ -341,8 +374,6 @@ export function App() {
     },
     []
   );
-
-  // ─── Slash Commands (single source of truth: src/commands) ─────────────────
 
   const handleSlashCommand = useCallback(
     async (input: string): Promise<boolean> => {
@@ -379,8 +410,6 @@ export function App() {
           return typeof last.content === "string" ? last.content : null;
         },
         triggerRetry: async (retryInput: string) => {
-          // handleRetry already removed the last assistant exchange.
-          // Drop the leftover user message so handleSubmit can re-add it cleanly.
           const history = conversationRef.current.getHistory();
           if (history.length > 0 && history[history.length - 1].role === "user") {
             conversationRef.current.removeLastMessage();
@@ -398,8 +427,6 @@ export function App() {
     [pushCompleted, pushNotice, pushError, exit]
   );
 
-  // ─── Submit ────────────────────────────────────────────────────────────────
-
   const handleSubmit = useCallback(
     async (userInput: string) => {
       const trimmed = userInput.trim();
@@ -409,22 +436,25 @@ export function App() {
       lastUserInputRef.current = trimmed;
       pushCompleted({ id: nextId(), role: "user", content: trimmed });
 
-      // ── Auto-add @mentioned files to context ─────────────────
-      const mentionRegex = /@([\w.\/\-]+)/g;
-      let mentionMatch;
+      // Auto-add @mentioned files to context — uses unified atMention parser (now active, not dead code)
+      // parseAtMentions handles trailing punctuation stripping, binary detection, token limits
+      const mentionResult = parseAtMentions(trimmed);
       const mentionNotices: string[] = [];
 
-      while ((mentionMatch = mentionRegex.exec(trimmed)) !== null) {
-        const mentionedPath = mentionMatch[1];
-        if (!contextManagerRef.current.hasFile(mentionedPath)) {
-          const result = contextManagerRef.current.addFile(
-            mentionedPath,
-            "mention"
-          );
+      if (mentionResult.errors.length > 0) {
+        // Show errors as notices but don't block
+        mentionNotices.push(...mentionResult.errors.map(e => `⚠ ${e}`));
+      }
+
+      for (const att of mentionResult.attachments) {
+        if (!contextManagerRef.current.hasFile(att.filePath)) {
+          const result = contextManagerRef.current.addFile(att.filePath, "mention");
           if (result.success) {
             mentionNotices.push(
-              `Added to context: ${mentionedPath} (${formatTokenCount(result.tokens ?? 0)} tokens)`
+              `Added to context: ${att.filePath} (${formatTokenCount(result.tokens ?? 0)} tokens)`
             );
+          } else {
+            mentionNotices.push(`⚠ ${att.filePath}: ${result.error}`);
           }
         }
       }
@@ -468,7 +498,11 @@ export function App() {
           onToken: (token) => {
             fullResponseRef.current += token;
             streamBufferRef.current += token;
-            flushParagraphs();
+            // P1 optimization: only attempt paragraph flush when token contains newline or buffer is large
+            // Avoids O(n^2) scanning on every single token for large code blocks
+            if (token.includes("\n") || streamBufferRef.current.length > MAX_LIVE_CHARS) {
+              flushParagraphs();
+            }
             scheduleLiveUpdate();
           },
 
@@ -571,6 +605,7 @@ export function App() {
               stdout,
               stderr,
               hunks,
+              rawResult: result,
             };
 
             pushCompleted({
@@ -593,7 +628,7 @@ export function App() {
           onPermissionRequest: requestPermission,
 
           onAgentEvent: (event: AgentEvent) => {
-            if (event.kind === "server_error" || event.kind === "network_error") {
+            if (event.kind !== "server_error" && event.kind !== "network_error" && event.kind !== "rate_limit" && event.kind !== "agent_paused" && event.kind !== "agent_turn_end") {
               pushNotice(`⚠ ${event.message}`);
             }
 
@@ -626,11 +661,7 @@ export function App() {
             setAgentStatus("network_dropped");
             setNetworkDropped(true);
             flushAll();
-            pushCompleted({
-              id: nextId(),
-              role: "error",
-              content: event.message,
-            });
+            // Do not push to completedMessages here; InputBar handles the "network dropped" UI state inline.
           },
 
           onFatalError: (event: AgentEvent) => {
@@ -643,20 +674,10 @@ export function App() {
             });
           },
 
-          onError: (error: Error) => {
-            flushAll();
-            pushCompleted({
-              id: nextId(),
-              role: "error",
-              content: error.message,
-            });
-          },
-
           retrySignal,
         });
 
         flushAll();
-        conversationRef.current.addAssistantMessage(fullResponseRef.current);
         const histTokens = conversationRef.current.getHistoryTokens();
         const summary = contextManagerRef.current.getSummary(histTokens);
         setTokenCount(summary.used);
@@ -691,10 +712,7 @@ export function App() {
     ]
   );
 
-  // Keep ref current so /retry can call the latest submit handler
   handleSubmitRef.current = handleSubmit;
-
-  // ─── Question Handlers ─────────────────────────────────────────────────────
 
   const handleQuestionAnswer = useCallback((answer: string) => {
     setPendingQuestion(null);
@@ -707,25 +725,33 @@ export function App() {
     pushNotice("Question cancelled. Type a message to continue.");
   }, [pushNotice]);
 
-  useInput((input, key) => {
-    if (key.ctrl && input === "c") process.exit(0);
+  // Input handlers: Ctrl+C exit, R retry (expand now handled inside ToolOutput via its own useInput)
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input?.toLowerCase() === "c") {
+        process.exit(0);
+        return;
+      }
+      if (!key.ctrl && !key.meta && (input === "r" || input === "R") && networkDropped) {
+        retryPressedRef.current = true;
+        setNetworkDropped(false);
+        setAgentStatus("retrying");
+        pushNotice("Retrying connection...");
+      }
+    },
+    { isActive: true }
+  );
 
-    if ((input === "r" || input === "R") && networkDropped) {
-      retryPressedRef.current = true;
-      setNetworkDropped(false);
-      setAgentStatus("retrying");
-      pushNotice("Retrying connection...");
-    }
-  });
   const initialProvider = useRef(currentProvider);
   const initialModel = useRef(currentModel);
 
   const staticItems = useMemo(
     () => {
       if (completedMessages.length === 0) return [];
+      const messagesToMakeStatic = completedMessages.slice(0, -1);
       return [
         { kind: "welcome" as const },
-        ...completedMessages.map((msg) => ({ kind: "message" as const, msg })),
+        ...messagesToMakeStatic.map((msg) => ({ kind: "message" as const, msg })),
       ];
     },
     [completedMessages]
@@ -738,7 +764,6 @@ export function App() {
 
   return (
     <Box flexDirection="column">
-      {/* Scroll-safe history */}
       <Static items={staticItems}>
         {(item) => {
           if (item.kind === "welcome") {
@@ -750,16 +775,23 @@ export function App() {
               />
             );
           }
-          return <MessageItem key={item.msg.id} message={item.msg} />;
+          return <MessageItem key={item.msg.id} message={item.msg} isLast={false} />;
         }}
       </Static>
 
-      {/* DYNAMIC region — wrapped in a single container so Ink treats it as one unit */}
       <Box flexDirection="column" width={Math.max(termWidth - 2, 20)}>
         {completedMessages.length === 0 && (
           <WelcomeBanner
             provider={currentProvider}
             model={currentModel}
+          />
+        )}
+
+        {completedMessages.length > 0 && (
+          <MessageItem
+            key={completedMessages[completedMessages.length - 1].id}
+            message={completedMessages[completedMessages.length - 1]}
+            isLast={true}
           />
         )}
 
@@ -771,8 +803,22 @@ export function App() {
           />
         )}
 
-        {isLoading && !showLive && (
+        {isLoading && !showLive && agentStatus !== "retrying" && agentStatus !== "rate_limited" && agentStatus !== "network_dropped" && agentStatus !== "fatal_error" && (
           <LivePreview text="" activeTool={null} thinkingOnly />
+        )}
+
+        {agentStatus === "retrying" && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>└  </Text>
+            <Text color={Colors.AccentYellow}>↻ Connection failed. Retrying (attempt {retryAttempt})...</Text>
+          </Box>
+        )}
+
+        {agentStatus === "rate_limited" && rateLimitMs !== null && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>└  </Text>
+            <Text color={Colors.AccentYellow}>⏳ Rate limited by API. Waiting {Math.ceil(rateLimitMs / 1000)}s...</Text>
+          </Box>
         )}
 
         <Box marginTop={1} flexDirection="column">
@@ -827,14 +873,17 @@ export function App() {
             )}
           </Box>
 
-        {/* Status line — stays at the very bottom */}
-        {!isMenuOpen && (
+        {!isMenuOpen && !pendingQuestion && !pendingPermission && (
           <StatusLine
             provider={currentProvider}
             model={currentModel}
             tokenCount={tokenCount}
             tokenLimit={TOKEN_LIMITS[currentProvider]}
             contextFileCount={contextManagerRef.current.getFileCount()}
+            agentStatus={agentStatus}
+            rateLimitMs={rateLimitMs}
+            retryAttempt={retryAttempt}
+            networkDropped={networkDropped}
           />
         )}
       </Box>

@@ -41,15 +41,20 @@ describe("SendMessageSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects empty message", () => {
-    // Empty string is technically valid in zod string() unless .min(1)
-    // This test documents current behavior
+  it("rejects empty message (hardened)", () => {
+    // After hardening, empty message should be rejected
     const result = SendMessageSchema.safeParse({ message: "" });
-    expect(result.success).toBe(true); // document: no min length enforced
+    expect(result.success).toBe(false);
   });
 
   it("rejects missing message", () => {
     const result = SendMessageSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects message too long", () => {
+    const long = "a".repeat(6000);
+    const result = SendMessageSchema.safeParse({ message: long });
     expect(result.success).toBe(false);
   });
 });

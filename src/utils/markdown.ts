@@ -99,13 +99,13 @@ export function applyMarkdown(
 }
 
 /** Strip ANSI escape sequences (SGR only — enough for width math). */
-function stripAnsi(str: string): string {
+export function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 /** Approximate visible width (grapheme count on the stripped string). */
-function stringWidth(str: string): number {
+export function stringWidth(str: string): number {
   return [...stripAnsi(str)].length;
 }
 
@@ -148,7 +148,7 @@ export function formatToken(
       return inner
         .split(EOL)
         .map((line) =>
-          stripAnsi(line).trim() ? `${bar} ${chalk.italic.dim(line)}` : line,
+          stripAnsi(line).trim() ? `${bar} ${chalk.italic(line)}` : line,
         )
         .join(EOL) + EOL;
     }
@@ -211,7 +211,7 @@ export function formatToken(
             : PALETTE.heading3;
       const styled =
         h.depth === 1
-          ? chalk.hex(colorFor).bold.underline(inner)
+          ? chalk.hex(colorFor).bold.italic.underline(inner)
           : chalk.hex(colorFor).bold(inner);
       return styled + EOL + EOL;
     }
@@ -302,12 +302,21 @@ export function formatToken(
               .map((t) => formatToken(t, listDepth, orderedListNumber, token, highlight))
               .join("")
           : token.text;
-        return `${bullet} ${inner}${EOL}`;
+        
+        const bulletPrefixLen = stripAnsi(bulletStr).length + 1;
+        const innerLines = inner.split("\n");
+        const paddedInner = innerLines
+          .map((line: string, i: number) => (i === 0 ? line : " ".repeat(bulletPrefixLen) + line))
+          .join("\n");
+
+        return `${bullet} ${paddedInner}${EOL}`;
       }
       return token.text;
     }
     case "table": {
-      return renderTable(token as Tokens.Table, highlight) + EOL;
+      // Tables are now handled exclusively by the <MarkdownTable> React component
+      // If someone tries to format it manually, we just ignore or return plain text
+      return "";
     }
     case "escape":
       return token.text;
@@ -321,79 +330,7 @@ export function formatToken(
   }
 }
 
-function renderTable(
-  table: Tokens.Table,
-  highlight: SyntaxHighlighter | null,
-): string {
-  const display = (tokens: Token[] | undefined): string =>
-    stripAnsi(
-      (tokens ?? [])
-        .map((t) => formatToken(t, 0, null, null, highlight))
-        .join(""),
-    );
 
-  const columnWidths = table.header.map((header, index) => {
-    let max = stringWidth(display(header.tokens));
-    for (const row of table.rows) {
-      max = Math.max(max, stringWidth(display(row[index]?.tokens)));
-    }
-    return Math.max(max, 3);
-  });
-
-  const border = chalk.hex(PALETTE.tableBorder);
-
-  // Top border
-  let out = border("┌");
-  columnWidths.forEach((w, i) => {
-    out += border("─".repeat(w + 2));
-    out += i === columnWidths.length - 1 ? border("┐") : border("┬");
-  });
-  out += EOL;
-
-  // Header row
-  out += border("│");
-  table.header.forEach((header, index) => {
-    const content =
-      (header.tokens ?? [])
-        .map((t) => formatToken(t, 0, null, null, highlight))
-        .join("") ?? "";
-    const styledContent = chalk.bold.hex(PALETTE.heading2)(content);
-    const rawContent = stripAnsi(content);
-    out += " " + padAligned(styledContent, stringWidth(rawContent), columnWidths[index]!, table.align?.[index]) + " " + border("│");
-  });
-  out += EOL;
-
-  // Middle border
-  out += border("├");
-  columnWidths.forEach((w, i) => {
-    out += border("─".repeat(w + 2));
-    out += i === columnWidths.length - 1 ? border("┤") : border("┼");
-  });
-  out += EOL;
-
-  // Body rows
-  table.rows.forEach((row) => {
-    out += border("│");
-    row.forEach((cell, index) => {
-      const content =
-        (cell.tokens ?? [])
-          .map((t) => formatToken(t, 0, null, null, highlight))
-          .join("") ?? "";
-      const rawContent = stripAnsi(content);
-      out += " " + padAligned(content, stringWidth(rawContent), columnWidths[index]!, table.align?.[index]) + " " + border("│");
-    });
-    out += EOL;
-  });
-
-  // Bottom border
-  out += border("└");
-  columnWidths.forEach((w, i) => {
-    out += border("─".repeat(w + 2));
-    out += i === columnWidths.length - 1 ? border("┘") : border("┴");
-  });
-
-  return out;
-}
 
 /**
  * Pad `content` to `targetWidth` according to alignment. `displayWidth` is the

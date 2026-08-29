@@ -3,11 +3,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { parsePatch, type StructuredPatch } from "diff";
 import { requestPermission } from "../core/agent";
+import { assertSafePath, LIMITS, isBinaryFileSync } from "./guards";
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
 export const ApplyPatchSchema = z.object({
-  patch: z.string().describe(
+  patch: z.string().min(1).describe(
     "Standard unified diff string (--- and +++ headers required)"
   ),
   dryRun: z.boolean().optional().default(false).describe(
@@ -44,29 +45,20 @@ export interface ApplyPatchError {
 
 export type ApplyPatchResult = ApplyPatchOutput | ApplyPatchError;
 
-// ─── Protected Paths ──────────────────────────────────────────────────────────
-
-const PROTECTED_DIRS = [
-  "node_modules", ".git", ".next", ".nuxt",
-  "dist", "build", ".venv", "venv",
-  "__pycache__", ".cache",
-];
-
-function isProtectedPath(resolvedPath: string): boolean {
-  const normalized = resolvedPath.replace(/\\/g, "/");
-  return PROTECTED_DIRS.some((dir) =>
-    new RegExp(`(^|/)${dir}(/|$)`).test(normalized)
-  );
-}
-
 // ─── Path Helpers ─────────────────────────────────────────────────────────────
 
 function getRealPath(fileName: string | undefined): string | null {
   if (!fileName || fileName === "/dev/null") return null;
-  if (fileName.startsWith("a/") || fileName.startsWith("b/")) {
-    return fileName.substring(2);
+  // Strip leading a/ or b/ but handle absolute paths and edge cases
+  const trimmed = fileName.trim();
+  if (trimmed.startsWith("a/") || trimmed.startsWith("b/")) {
+    const stripped = trimmed.substring(2);
+    // Prevent stripping to empty or absolute escape like /etc
+    if (!stripped || stripped.startsWith("/")) return stripped || null;
+    return stripped;
   }
-  return fileName;
+  // Handle quoted paths (diff may quote)
+  return trimmed.replace(/^"|"$/g, "");
 }
 
 // ─── Hunk Application ────────────────────────────────────────────────────────
@@ -79,6 +71,7 @@ function applyHunk(
   success: boolean;
   newLines: string[];
   linesChanged: number;
+  matchDrift: number;
   error?: string;
 } {
   const targetStart = hunk.oldStart - 1 + offset;
@@ -95,7 +88,6 @@ function applyHunk(
       expectedOld.push(line.substring(1));
       newLinesToAdd.push(line.substring(1));
     }
-    // Lines starting with \ (no newline at end of file) are intentionally skipped
   }
 
   let matchIndex = -1;
@@ -126,26 +118,35 @@ function applyHunk(
   }
 
   if (matchIndex === -1) {
+    // Provide context preview for error
+    const contextStart = Math.max(0, targetStart - 2);
+    const contextEnd = Math.min(fileLines.length, targetStart + 3);
+    const contextPreview = fileLines.slice(contextStart, contextEnd).map((l, idx) => {
+      const lineNum = contextStart + idx + 1;
+      return `${lineNum}: ${l.slice(0, 120)}`;
+    }).join("\n");
+
     return {
       success: false,
       newLines: fileLines,
       linesChanged: 0,
+      matchDrift: 0,
       error:
-        `Could not find matching context near line ${hunk.oldStart}. ` +
-        `The file may have changed since the patch was generated.`,
+        `Could not find matching context near line ${hunk.oldStart} (attempted ${targetStart + 1} with drift ±${MAX_DRIFT}). ` +
+        `File may have changed.\n\nExpected:\n${expectedOld.slice(0, 5).join("\n")}\n\nActual near location:\n${contextPreview}`,
     };
   }
 
   const before = fileLines.slice(0, matchIndex);
   const after = fileLines.slice(matchIndex + expectedOld.length);
-  const linesChanged =
-    Math.abs(expectedOld.length - newLinesToAdd.length) +
-    Math.min(expectedOld.length, newLinesToAdd.length);
+  const linesChanged = Math.max(expectedOld.length, newLinesToAdd.length);
+  const matchDrift = matchIndex - targetStart;
 
   return {
     success: true,
     newLines: [...before, ...newLinesToAdd, ...after],
     linesChanged,
+    matchDrift,
   };
 }
 
@@ -154,7 +155,14 @@ function applyHunk(
 export async function applyPatch(
   input: ApplyPatchInput
 ): Promise<ApplyPatchResult> {
-  // ── Parse ─────────────────────────────────────────────────────────────────
+  // Guard against huge patch
+  if (Buffer.byteLength(input.patch, "utf-8") > 2 * 1024 * 1024) {
+    return {
+      success: false,
+      error: "Patch too large (>2MB). Split into smaller patches.",
+      hints: ["Apply changes in smaller chunks, 1-3 files at a time."],
+    };
+  }
 
   let parsed: StructuredPatch[];
   try {
@@ -164,9 +172,9 @@ export async function applyPatch(
       success: false,
       error: `Failed to parse patch: ${e.message}`,
       hints: [
-        "Ensure your patch uses standard unified diff format.",
+        "Ensure patch uses standard unified diff format.",
         "Each file section must start with --- and +++ lines.",
-        "Hunk headers must follow the @@ -L,S +L,S @@ format.",
+        "Hunk headers must follow @@ -L,S +L,S @@ format.",
       ],
     };
   }
@@ -176,17 +184,33 @@ export async function applyPatch(
       success: false,
       error: "Empty or invalid patch — no file diffs found.",
       hints: [
-        "Check that the patch string includes at least one --- / +++ block.",
+        "Check that patch includes at least one --- / +++ block.",
         "Example:\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1,3 +1,4 @@\n context\n+new line\n context",
       ],
     };
   }
 
-  // ── Validate all operations first (nothing written yet) ───────────────────
+  if (parsed.length > LIMITS.MAX_PATCH_FILES) {
+    return {
+      success: false,
+      error: `Patch contains ${parsed.length} files, exceeds limit ${LIMITS.MAX_PATCH_FILES}.`,
+      hints: ["Split patch into smaller chunks, max 10 files at a time."],
+    };
+  }
+
+  const totalHunks = parsed.reduce((acc, f) => acc + f.hunks.length, 0);
+  if (totalHunks > LIMITS.MAX_PATCH_HUNKS) {
+    return {
+      success: false,
+      error: `Patch contains ${totalHunks} hunks, exceeds limit ${LIMITS.MAX_PATCH_HUNKS}.`,
+      hints: ["Break refactor into smaller steps."],
+    };
+  }
 
   const patches: PatchResult[] = [];
   const fileOperations: Array<{
     resolvedPath: string;
+    originalPath: string;
     newContent: string | null;
     isDelete: boolean;
   }> = [];
@@ -198,40 +222,45 @@ export async function applyPatch(
 
     if (!targetPath) continue;
 
-    const resolved = path.resolve(process.cwd(), targetPath);
-
-    if (isProtectedPath(resolved)) {
+    // Safe path validation
+    const safe = assertSafePath(targetPath);
+    if (safe.error) {
       return {
         success: false,
-        error: `Blocked: Cannot patch protected path '${targetPath}'.`,
+        error: `Blocked: ${safe.error}`,
         path: targetPath,
-        hints: ["Protected directories cannot be modified by apply_patch."],
+        hints: ["Patch target must be inside project root and not protected."],
       };
     }
+    const resolved = safe.resolved;
 
     const isDelete = fileDiff.newFileName === "/dev/null";
     const isCreate = fileDiff.oldFileName === "/dev/null";
 
-    // ── Deletion ─────────────────────────────────────────────────────────────
+    if (!isCreate && isBinaryFileSync(resolved)) {
+      patches.push({
+        path: targetPath,
+        status: "FAILED",
+        error: "Cannot patch binary file",
+      });
+      continue;
+    }
 
     if (isDelete) {
       if (!fs.existsSync(resolved)) {
         patches.push({
           path: targetPath,
           status: "FAILED",
-          error: "File does not exist",
+          error: "File does not exist for deletion",
         });
         continue;
       }
-      fileOperations.push({ resolvedPath: resolved, newContent: null, isDelete: true });
+      fileOperations.push({ resolvedPath: resolved, originalPath: targetPath, newContent: null, isDelete: true });
       patches.push({ path: targetPath, status: "APPLIED", hunks: 0, linesChanged: 0 });
       continue;
     }
 
-    // ── Creation or modification ──────────────────────────────────────────────
-
     let fileLines: string[] = [];
-
     if (!isCreate) {
       if (!fs.existsSync(resolved)) {
         patches.push({
@@ -245,15 +274,14 @@ export async function applyPatch(
       fileLines = content.split("\n");
     }
 
-    // ── Apply hunks ───────────────────────────────────────────────────────────
-
     let offset = 0;
     let totalLinesChanged = 0;
     let hunkCount = 0;
     let fileFailed = false;
+    let fileLinesWorking = fileLines;
 
     for (const hunk of fileDiff.hunks) {
-      const result = applyHunk(fileLines, hunk, offset);
+      const result = applyHunk(fileLinesWorking, hunk, offset);
 
       if (!result.success) {
         patches.push({
@@ -264,19 +292,32 @@ export async function applyPatch(
           linesChanged: totalLinesChanged,
         });
         fileFailed = true;
-        break; // Stop processing hunks — do not partially apply
+        break;
       }
 
-      fileLines = result.newLines;
-      offset += hunk.newLines - hunk.oldLines;
+      fileLinesWorking = result.newLines;
+      // Fix offset: include drift + line delta
+      offset += result.matchDrift + (hunk.newLines - hunk.oldLines);
       totalLinesChanged += result.linesChanged;
       hunkCount++;
     }
 
     if (!fileFailed) {
+      const newContentStr = fileLinesWorking.join("\n");
+      // Size check
+      if (Buffer.byteLength(newContentStr, "utf-8") > LIMITS.MAX_WRITE_BYTES) {
+        patches.push({
+          path: targetPath,
+          status: "FAILED",
+          error: `Resulting file too large >${(LIMITS.MAX_WRITE_BYTES / 1024 / 1024).toFixed(0)}MB`,
+        });
+        continue;
+      }
+
       fileOperations.push({
         resolvedPath: resolved,
-        newContent: fileLines.join("\n"),
+        originalPath: targetPath,
+        newContent: newContentStr,
         isDelete: false,
       });
       patches.push({
@@ -288,65 +329,61 @@ export async function applyPatch(
     }
   }
 
-  // ── Guard: malformed patch headers — parsePatch succeeded but found nothing
-
   if (fileOperations.length === 0 && patches.length === 0) {
     return {
       success: false,
-      error: "Patch parsed successfully but no valid file operations were found.",
+      error: "Patch parsed but no valid file operations found.",
       hints: [
-        "Ensure your patch includes valid file paths in the --- and +++ headers.",
-        "Required format:\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1,3 +1,4 @@",
+        "Ensure patch includes valid file paths in --- and +++ headers.",
+        "Required: --- a/src/file.ts, +++ b/src/file.ts, @@ -1,3 +1,4 @@",
       ],
     };
   }
 
-  // ── Guard: all files failed — report without hitting permission gate ───────
-
   const anyApplied = patches.some(p => p.status === "APPLIED");
   if (!anyApplied && !input.dryRun) {
+    const failedDetails = patches.map(p => `${p.path}: ${p.error}`).join("\n");
     return {
       success: false,
-      error: `All ${patches.length} file patch(es) failed. No changes were made.`,
+      error: `All ${patches.length} file patch(es) failed. No changes made.\n${failedDetails}`,
       hints: [
-        "Read each file again with read_file to get its current content.",
-        "Regenerate the patch against the current content.",
+        "Read each file again with read_file to get current content.",
+        "Regenerate patch against current content.",
         "Use dryRun: true to validate before applying.",
       ],
     };
   }
-
-  // ── Dry run — report without writing ──────────────────────────────────────
 
   if (input.dryRun) {
     const dryRunPatches = patches.map(p => ({
       ...p,
       status: "DRY_RUN" as const,
     }));
-
     return {
       success: true,
       dryRun: true,
       patches: dryRunPatches,
       hints: [
-        "Dry run complete. No files were modified.",
-        "Remove dryRun: true and call apply_patch again to apply changes.",
+        "Dry run complete. No files modified.",
+        "Remove dryRun: true to apply changes.",
+        ...patches.filter(p => p.status === "FAILED").map(p => `FAILED ${p.path}: ${p.error}`),
       ],
     };
   }
 
-  // ── Permission gate ───────────────────────────────────────────────────────
-
   const appliedPatches = patches.filter(p => p.status === "APPLIED");
-  const permissionDetails = appliedPatches.map(
-    (p) =>
-      `APPLIED: ${p.path} ` +
-      `(${p.hunks ?? 0} hunk${p.hunks !== 1 ? "s" : ""}, ~${p.linesChanged ?? 0} lines)`
-  );
+  const failedPatches = patches.filter(p => p.status === "FAILED");
+
+  const permissionDetails = [
+    ...appliedPatches.map(
+      (p) => `APPLIED: ${p.path} (${p.hunks ?? 0} hunks, ~${p.linesChanged ?? 0} lines)`
+    ),
+    ...failedPatches.map(p => `FAILED: ${p.path} — ${p.error}`),
+  ];
 
   const approved = await requestPermission(
     "apply_patch",
-    `Apply patch to ${appliedPatches.length} file${appliedPatches.length !== 1 ? "s" : ""}`,
+    `Apply patch to ${appliedPatches.length} file${appliedPatches.length !== 1 ? "s" : ""}${failedPatches.length ? ` (${failedPatches.length} failed)` : ""}`,
     permissionDetails
   );
 
@@ -354,18 +391,19 @@ export async function applyPatch(
     return {
       success: false,
       error: "User denied patch application.",
-      hints: ["Use dryRun: true to preview changes without requiring approval."],
+      hints: ["Use dryRun: true to preview without approval."],
     };
   }
 
-  // ── Write — validated operations only ────────────────────────────────────
-
+  // Write validated ops only, atomic
   for (const op of fileOperations) {
     if (op.isDelete) {
       fs.rmSync(op.resolvedPath, { force: true });
     } else {
       fs.mkdirSync(path.dirname(op.resolvedPath), { recursive: true });
-      fs.writeFileSync(op.resolvedPath, op.newContent!, "utf-8");
+      const tmp = `${op.resolvedPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      fs.writeFileSync(tmp, op.newContent!, "utf-8");
+      fs.renameSync(tmp, op.resolvedPath);
     }
   }
 
@@ -376,7 +414,12 @@ export async function applyPatch(
     hunks: parsed ? parsed.flatMap((p) => p.hunks) : undefined,
     hints:
       appliedPatches.length > 1
-        ? ["All files patched successfully. Run your tests to verify the changes."]
-        : undefined,
+        ? [
+            `Applied ${appliedPatches.length} file(s), ${failedPatches.length} failed. Run tests to verify.`,
+            ...failedPatches.map(f => `Failed ${f.path}: ${f.error}`),
+          ]
+        : failedPatches.length > 0
+          ? failedPatches.map(f => `Failed ${f.path}: ${f.error}`)
+          : undefined,
   };
 }

@@ -1,29 +1,19 @@
-// src/providers/groq.ts
-import { createGroq } from "@ai-sdk/groq";
+// src/providers/groq.ts — now delegates to unified registry
 import { streamText } from "ai";
 import type { Message } from "../core/conversation";
 import type { Config } from "../core/config";
 import type { StreamResult } from "./openrouter";
 import { translateProviderError } from "../errors/apiErrors";
 import type { AgentEvent } from "../errors/base";
+import { providerRegistry, GROQ_MODELS as REGISTRY_MODELS, GROQ_DEFAULT_MODEL as REGISTRY_DEFAULT } from "./registry";
 
-// ━━━ Available Groq Models ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const GROQ_MODELS = [
-  "llama-3.1-70b-versatile",
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "mixtral-8x7b-32768",
-  "gemma2-9b-it",
-] as const;
-
-export const GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile";
-
-// ━━━ Groq Client ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Re-export canonical lists from registry
+export const GROQ_MODELS = REGISTRY_MODELS;
+export const GROQ_DEFAULT_MODEL = REGISTRY_DEFAULT;
 
 /**
- * Returns a StreamResult on success.
- * On failure, returns a typed AgentEvent — never throws to console.
+ * @deprecated Use providerRegistry.groq.createModel via getProvider() in providers/index.ts
+ * Kept for backward compat with old tests, now uses registry internally
  */
 export async function chatWithGroq(
   messages: Message[],
@@ -31,8 +21,9 @@ export async function chatWithGroq(
   config: Config,
   attempt = 1
 ): Promise<StreamResult | AgentEvent> {
-  if (!config.groqApiKey) {
-    // Missing key is an auth event, not a crash
+  const def = providerRegistry.groq;
+  const apiKey = def.getApiKey(config);
+  if (!apiKey) {
     return {
       kind: "auth_error",
       message: "GROQ_API_KEY is not set. Add it to your .env file.",
@@ -44,24 +35,21 @@ export async function chatWithGroq(
     };
   }
 
-  const groq = createGroq({ apiKey: config.groqApiKey });
-
   const formattedMessages = messages.map((msg) => ({
     role: msg.role as "system" | "user" | "assistant",
     content: msg.content,
   }));
 
   try {
+    const groqModel = def.createModel(apiKey, model);
     const result = streamText({
-      model: groq(model),
-      messages: formattedMessages,
+      model: groqModel,
+      messages: formattedMessages as any,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
     });
-
     return { stream: result.textStream };
   } catch (error) {
-    // Translate raw HTTP/network error into a typed event
     return translateProviderError("groq", error, attempt);
   }
 }

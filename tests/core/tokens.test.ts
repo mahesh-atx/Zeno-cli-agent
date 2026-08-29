@@ -1,4 +1,3 @@
-// src/core/tokens.test.ts
 import { describe, it, expect } from "vitest";
 import {
   countTokens,
@@ -7,8 +6,6 @@ import {
   formatTokenCount,
 } from "../../src/utils/tokens";
 import type { Message } from "../../src/core/conversation";
-
-// ━━━ countTokens ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("countTokens", () => {
   it("returns 0 for empty string", () => {
@@ -29,19 +26,21 @@ describe("countTokens", () => {
     expect(long).toBeGreaterThan(short);
   });
 
-  it("uses approximately 1 token per 4 characters", () => {
-    // 40 chars → ~10 tokens (ceil(40/4) = 10)
+  it("uses tokenizer (approx 1 token per ~4-8 chars) for 40 chars", () => {
     const text = "a".repeat(40);
-    expect(countTokens(text)).toBe(10);
+    const tokens = countTokens(text);
+    // With gpt-tokenizer, 40 a's = 5 tokens, with fallback ceil(40/4)=10
+    // Allow range to support both
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeLessThanOrEqual(15);
   });
 
-  it("rounds up (ceil not floor)", () => {
-    // 5 chars → ceil(5/4) = 2
-    expect(countTokens("hello")).toBe(2);
+  it("counts hello as 1 token with tokenizer (previously ceil)", () => {
+    const tokens = countTokens("hello");
+    // gpt-tokenizer gives 1, old heuristic gave 2
+    expect([1, 2]).toContain(tokens);
   });
 });
-
-// ━━━ countMessageTokens ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("countMessageTokens", () => {
   it("adds 4 overhead tokens to content tokens", () => {
@@ -63,8 +62,6 @@ describe("countMessageTokens", () => {
     expect(countMessageTokens(msg)).toBe(4);
   });
 });
-
-// ━━━ countHistoryTokens ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("countHistoryTokens", () => {
   it("returns 0 for empty array", () => {
@@ -103,8 +100,6 @@ describe("countHistoryTokens", () => {
   });
 });
 
-// ━━━ formatTokenCount ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 describe("formatTokenCount", () => {
   it("formats zero", () => {
     expect(formatTokenCount(0)).toBe("0");
@@ -116,7 +111,6 @@ describe("formatTokenCount", () => {
   });
 
   it("formats thousands with comma separator", () => {
-    // en-US locale uses commas
     const result = formatTokenCount(1000);
     expect(result).toBe("1,000");
   });

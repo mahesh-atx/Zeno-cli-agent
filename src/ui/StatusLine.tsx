@@ -1,10 +1,10 @@
 // src/ui/StatusLine.tsx
-import React from "react";
+import React, { useMemo } from "react";
 import { Box, Text } from "ink";
+import * as fs from "fs";
+import * as path from "path";
 import { formatTokenCount } from "../utils/tokens";
 import { Colors } from "../themes/colors";
-
-// ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 type AgentStatus =
   | "idle"
@@ -20,14 +20,11 @@ interface StatusLineProps {
   tokenCount: number;
   tokenLimit: number;
   contextFileCount: number;
-  // New error system props — all optional so existing callers don't break
   agentStatus?: AgentStatus;
   rateLimitMs?: number | null;
   retryAttempt?: number;
   networkDropped?: boolean;
 }
-
-// ━━━ Token Color ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function getTokenColor(used: number, limit: number): string {
   const pct = limit > 0 ? used / limit : 0;
@@ -36,52 +33,54 @@ function getTokenColor(used: number, limit: number): string {
   return Colors.Foreground;
 }
 
-// ━━━ Agent Status Display ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getTokenBar(used: number, limit: number, width = 10): { bar: string; pct: number } {
+  const pct = limit > 0 ? Math.min(1, used / limit) : 0;
+  const filled = Math.round(width * pct);
+  const empty = width - filled;
+  const bar = `${"█".repeat(filled)}${"░".repeat(empty)}`;
+  return { bar, pct };
+}
 
-function AgentStatusIndicator({
-  agentStatus,
-  rateLimitMs,
-  retryAttempt,
-}: {
-  agentStatus: AgentStatus;
-  rateLimitMs: number | null;
-  retryAttempt: number;
-}) {
-  switch (agentStatus) {
-    case "running":
-      return <Text color={Colors.AccentCyan}>⬤ running</Text>;
-
-    case "retrying":
-      return (
-        <Text color={Colors.AccentYellow}>
-          ↻ retrying{retryAttempt > 0 ? ` (attempt ${retryAttempt + 1})` : ""}
-        </Text>
-      );
-
-    case "rate_limited": {
-      // Show countdown timer in seconds
-      const secs =
-        rateLimitMs !== null ? Math.ceil(rateLimitMs / 1000) : "...";
-      return (
-        <Text color={Colors.AccentYellow}>
-          ⏳ rate limited — wait {secs}s
-        </Text>
-      );
+function getCwdLabel(): string {
+  try {
+    const cwd = process.cwd();
+    const home = process.env.HOME || "";
+    let label = cwd;
+    if (home && cwd.startsWith(home)) {
+      label = "~" + cwd.slice(home.length);
     }
-
-    case "network_dropped":
-      return <Text color={Colors.AccentRed}>✖ network dropped — press R to retry</Text>;
-
-    case "fatal_error":
-      return <Text color={Colors.AccentRed}>✖ error — see above</Text>;
-
-    case "idle":
-    default:
-      return <Text color={Colors.AccentGreen}>● ready</Text>;
+    // Show last 2 segments if deep, e.g., ~/a/b/c -> b/c, or just basename if shallow
+    const parts = label.split("/").filter(Boolean);
+    if (parts.length > 2) {
+      // Keep ~/ + last 2
+      if (label.startsWith("~")) {
+        return `~/${parts.slice(-2).join("/")}`;
+      }
+      return parts.slice(-2).join("/");
+    }
+    return label || "/";
+  } catch {
+    return "";
   }
 }
 
-// ━━━ Component ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getGitBranch(): string | null {
+  try {
+    const gitHeadPath = path.join(process.cwd(), ".git", "HEAD");
+    if (!fs.existsSync(gitHeadPath)) return null;
+    const content = fs.readFileSync(gitHeadPath, "utf-8").trim();
+    if (content.startsWith("ref: refs/heads/")) {
+      return content.replace("ref: refs/heads/", "");
+    }
+    if (content.length >= 7) {
+      // Detached HEAD, show short hash
+      return content.slice(0, 7);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export function StatusLine({
   provider,
@@ -89,56 +88,53 @@ export function StatusLine({
   tokenCount,
   tokenLimit,
   contextFileCount,
-  agentStatus = "idle",
-  rateLimitMs = null,
-  retryAttempt = 0,
-  networkDropped = false,
 }: StatusLineProps) {
   const tokenColor = getTokenColor(tokenCount, tokenLimit);
+  const { bar, pct } = getTokenBar(tokenCount, tokenLimit, 10);
+  const barColor = getTokenColor(tokenCount, tokenLimit);
+
+  const cwdLabel = useMemo(() => getCwdLabel(), [tokenCount]); // recompute when tokens change (approx when cwd might change)
+  const gitBranch = useMemo(() => getGitBranch(), [tokenCount]);
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box
-        paddingX={1}
-        flexDirection="row"
-        justifyContent="space-between"
-      >
-      {/* Left: provider + model + agent status */}
-      <Box gap={1}>
-        <Text color={Colors.AccentCyan} bold>
-          CLI Agent
-        </Text>
-        <Text color={Colors.Gray}>│</Text>
-        <Text color={Colors.AccentCyan}>{provider}</Text>
-        <Text color={Colors.Gray}>│</Text>
-        <Text color={Colors.AccentGreen}>{model}</Text>
-        <Text color={Colors.Gray}>│</Text>
-        <AgentStatusIndicator
-          agentStatus={agentStatus}
-          rateLimitMs={rateLimitMs}
-          retryAttempt={retryAttempt}
-        />
-      </Box>
+      <Box paddingX={1} flexDirection="row" justifyContent="space-between">
+        {/* Left: provider + model + agent status */}
+        <Box gap={1} flexShrink={1}>
+          <Text color={Colors.AccentCyan} wrap="truncate">{provider}</Text>
+          <Text color={Colors.Gray}>│</Text>
+          <Text color={Colors.AccentGreen} wrap="truncate">{model}</Text>
+        </Box>
 
-      {/* Right: context files + tokens */}
-      <Box gap={1}>
-        {contextFileCount > 0 && (
-          <>
-            <Text color={Colors.Gray}>{contextFileCount} files</Text>
-            <Text color={Colors.Gray}>│</Text>
-          </>
-        )}
-        <Text color={tokenColor !== Colors.Foreground ? tokenColor : Colors.Gray}>tokens:</Text>
-        <Text color={tokenColor} bold>
-          {formatTokenCount(tokenCount)}
-        </Text>
-        {tokenLimit > 0 && (
-          <>
-            <Text color={tokenColor !== Colors.Foreground ? tokenColor : Colors.Gray}>/</Text>
-            <Text color={tokenColor !== Colors.Foreground ? tokenColor : Colors.Gray}>{formatTokenCount(tokenLimit)}</Text>
-          </>
-        )}
-      </Box>
+        {/* Right: cwd, branch, files, tokens with bar */}
+        <Box gap={1} flexShrink={0}>
+          {cwdLabel && (
+            <>
+              <Text color={Colors.Gray} wrap="truncate-middle">{cwdLabel}</Text>
+              <Text color={Colors.Gray}>│</Text>
+            </>
+          )}
+          {gitBranch && (
+            <>
+              <Text color={Colors.AccentPurple} wrap="truncate"> {gitBranch}</Text>
+              <Text color={Colors.Gray}>│</Text>
+            </>
+          )}
+          {contextFileCount > 0 && (
+            <>
+              <Text color={Colors.Gray}>{contextFileCount} files</Text>
+              <Text color={Colors.Gray}>│</Text>
+            </>
+          )}
+          <Text color={tokenColor} bold>{formatTokenCount(tokenCount)}</Text>
+          {tokenLimit > 0 && (
+            <>
+              <Text color={Colors.Gray}>/</Text>
+              <Text color={Colors.Gray}>{formatTokenCount(tokenLimit)}</Text>
+              <Text color={Colors.Gray}>({(pct * 100).toFixed(0)}%)</Text>
+            </>
+          )}
+        </Box>
       </Box>
     </Box>
   );

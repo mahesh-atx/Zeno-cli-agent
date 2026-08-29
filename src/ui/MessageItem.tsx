@@ -1,9 +1,10 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { ToolOutput } from "./ToolOutput";
+import { ToolOutput, GroupedReadFilesOutput } from "./ToolOutput";
 import type { ToolCall } from "./ToolOutput";
 import { Ansi } from "./Ansi";
-import { renderMarkdown, renderStreaming } from "../utils/render";
+import { getHighlighter } from "../utils/render";
+import { Markdown } from "./Markdown";
 import { Colors } from "../themes/colors";
 
 export type MessageRole = "user" | "assistant" | "error" | "system-notice";
@@ -19,6 +20,7 @@ export interface ChatMessage {
 
 interface MessageItemProps {
   message: ChatMessage;
+  isLast?: boolean;
 }
 
 function UserMessage({ content }: { content: string }) {
@@ -37,25 +39,31 @@ function AssistantMessage({
   isStreaming,
   toolCalls,
   hideIcon,
+  isLast,
 }: {
   content: string;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
   hideIcon?: boolean;
+  isLast?: boolean;
 }) {
-  const rendered = isStreaming
-    ? renderStreaming(content)
-    : content
-    ? renderMarkdown(content).trim()
-    : "";
+  const textContent = content + (isStreaming ? "\u258a" : "");
 
   return (
     <Box flexDirection="column" marginTop={hideIcon ? 0 : 1}>
       {toolCalls && toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={content || isStreaming ? 1 : 0}>
-          {toolCalls.map((tc) => (
-            <ToolOutput key={tc.id} toolCall={tc} />
-          ))}
+          {toolCalls.length > 1 && toolCalls.every(tc => tc.toolName === "read_file") ? (
+            <Box marginBottom={1} marginLeft={2}>
+              <GroupedReadFilesOutput toolCalls={toolCalls} isLast={isLast} />
+            </Box>
+          ) : (
+            toolCalls.map((tc) => (
+              <Box key={tc.id} marginBottom={1} marginLeft={2}>
+                <ToolOutput toolCall={tc} isLast={isLast} />
+              </Box>
+            ))
+          )}
         </Box>
       )}
 
@@ -68,12 +76,9 @@ function AssistantMessage({
           <Box flexDirection="column">
             {isStreaming && !content && <Text color={Colors.Gray}>thinking…</Text>}
 
-            {rendered && (
+            {textContent && (
               <Box flexDirection="column">
-                <Ansi wrap="wrap">
-                  {rendered}
-                  {isStreaming ? "\u258a" : ""}
-                </Ansi>
+                <Markdown content={textContent} highlight={getHighlighter()} />
               </Box>
             )}
           </Box>
@@ -85,9 +90,13 @@ function AssistantMessage({
 
 function ErrorMessage({ content }: { content: string }) {
   return (
-    <Box marginTop={1}>
-      <Text color={Colors.AccentRed}>⚠ </Text>
-      <Text color={Colors.AccentRed} wrap="wrap">{content}</Text>
+    <Box flexDirection="row" marginTop={1}>
+      <Box width={2} flexShrink={0}>
+        <Text color={Colors.AccentRed}>│ </Text>
+      </Box>
+      <Box flexDirection="column">
+        <Text color={Colors.AccentRed} wrap="wrap">{content}</Text>
+      </Box>
     </Box>
   );
 }
@@ -102,7 +111,7 @@ function SystemNotice({ content }: { content: string }) {
   );
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, isLast }: MessageItemProps) {
   switch (message.role) {
     case "user":
       return <UserMessage content={message.content} />;
@@ -113,6 +122,7 @@ export function MessageItem({ message }: MessageItemProps) {
           isStreaming={message.isStreaming}
           toolCalls={message.toolCalls}
           hideIcon={message.hideIcon}
+          isLast={isLast}
         />
       );
     case "error":

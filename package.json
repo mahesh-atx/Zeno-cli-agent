@@ -28,6 +28,7 @@
     "execa": "^5.1.1",
     "fast-glob": "^3.3.3",
     "fuse.js": "^7.4.2",
+    "gpt-tokenizer": "^3.4.0",
     "gradient-string": "^3.0.0",
     "ignore": "^7.0.5",
     "ink": "npm:@jrichman/ink@^6.6.9",
@@ -40,6 +41,7 @@
     "tinycolor2": "^1.6.0",
     "tinygradient": "^2.0.1",
     "turndown": "^7.2.4",
+    "wrap-ansi": "^10.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -49,6 +51,7 @@
     "@types/node": "^22.15.3",
     "@types/react": "^19.2.17",
     "@types/turndown": "^5.0.6",
+    "ink-testing-library": "^4.0.0",
     "tsup": "^8.4.0",
     "tsx": "^4.22.4",
     "typescript": "^5.8.3",

@@ -46,35 +46,65 @@ const BUILT_IN_THEMES: Theme[] = [
 
 const DEFAULT_THEME: Theme = DefaultDark;
 
-/** Plain-text dotfile in the user's home dir holding the active theme name. */
+/** Plain-text dotfile in the user's home dir holding the active theme name (legacy). */
 const THEME_STORAGE_PATH = '.cli-agent-theme';
+/** XDG compliant path: $XDG_CONFIG_HOME/cli-agent/theme or ~/.config/cli-agent/theme */
+const XDG_THEME_DIR = 'cli-agent';
+const XDG_THEME_FILE = 'theme';
 /** Directory (user home) holding `*.json` custom theme definitions. */
 const USER_THEMES_DIR = '.cli-agent/themes';
 /** Directory (project-local) holding `*.json` custom theme definitions. */
 const PROJECT_THEMES_DIR = '.cli-agent/themes';
+/** XDG custom themes dir: $XDG_CONFIG_HOME/cli-agent/themes */
+const XDG_THEMES_SUBDIR = 'themes';
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
+// ─── Persistence — XDG aware ──────────────────────────────────────────────────
+
+function getXdgConfigHome(): string {
+  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+}
+
+function getXdgThemePath(): string {
+  return path.join(getXdgConfigHome(), XDG_THEME_DIR, XDG_THEME_FILE);
+}
+
+function getLegacyThemePath(): string {
+  return path.join(os.homedir(), THEME_STORAGE_PATH);
+}
 
 function loadPersistedThemeName(): string | undefined {
-  try {
-    const homeDir = os.homedir();
-    const filePath = path.join(homeDir, THEME_STORAGE_PATH);
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf-8').trim();
+  // Try XDG first (new), then legacy dotfile
+  const candidates = [getXdgThemePath(), getLegacyThemePath()];
+  for (const filePath of candidates) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf-8').trim();
+        if (content) return content;
+      }
+    } catch {
+      // ignore and try next
     }
-  } catch {
-    /* ignore — fall back to default */
   }
   return undefined;
 }
 
 function persistThemeName(name: string): void {
+  // Persist to XDG path (preferred), fallback to legacy if XDG fails
   try {
-    const homeDir = os.homedir();
-    const filePath = path.join(homeDir, THEME_STORAGE_PATH);
-    fs.writeFileSync(filePath, name, 'utf-8');
+    const xdgPath = getXdgThemePath();
+    const dir = path.dirname(xdgPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(xdgPath, name, 'utf-8');
+    return;
   } catch {
-    /* ignore — non-fatal if persistence is unavailable */
+    // try legacy
+  }
+
+  try {
+    const legacyPath = getLegacyThemePath();
+    fs.writeFileSync(legacyPath, name, 'utf-8');
+  } catch {
+    /* ignore — non-fatal */
   }
 }
 
@@ -184,13 +214,15 @@ function loadCustomThemesFromDir(dir: string): Theme[] {
 }
 
 /**
- * Load custom themes from both the user-home and project-local theme
- * directories. On a name clash the project-local definition wins (it's
- * pushed last and dedupe keeps the later entry).
+ * Load custom themes from user-home, XDG, and project-local directories.
+ * Precedence: XDG < user-home < project-local (project wins on clash).
  */
 function loadAllCustomThemes(): Theme[] {
   const userDir = path.join(os.homedir(), USER_THEMES_DIR);
+  const xdgDir = path.join(getXdgConfigHome(), XDG_THEME_DIR, XDG_THEMES_SUBDIR);
   const projectDir = path.join(process.cwd(), PROJECT_THEMES_DIR);
+
+  const xdgThemes = loadCustomThemesFromDir(xdgDir);
   const userThemes = loadCustomThemesFromDir(userDir);
   const projectThemes = loadCustomThemesFromDir(projectDir);
 
@@ -203,8 +235,11 @@ function loadAllCustomThemes(): Theme[] {
       merged.push(t);
     }
   };
+
+  // Order matters for precedence: lowest first
+  xdgThemes.forEach(push);
   userThemes.forEach(push);
-  // Project-local overrides user-local: drop a duplicate user entry first.
+  // Project-local overrides: drop duplicates first
   for (const pt of projectThemes) {
     const key = pt.name.toLowerCase();
     const dupIdx = merged.findIndex((m) => m.name.toLowerCase() === key);

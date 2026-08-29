@@ -1,13 +1,16 @@
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import ignore from "ignore";
+import { assertSafePath, LIMITS } from "./guards";
 
 export const SearchFilesSchema = z.object({
-  query: z.string().describe("The text or regex pattern to search for"),
+  query: z.string().min(1).describe("The text or regex pattern to search for"),
   directory: z.string().optional().default(".").describe("Directory to search in"),
   caseSensitive: z.boolean().optional().default(false),
   isRegex: z.boolean().optional().default(false).describe("Set to true if query is a regex pattern"),
   filePattern: z.string().optional().describe("Optional file extension or pattern to filter (e.g., '.ts', '.js')"),
+  maxResults: z.number().int().positive().max(200).optional().default(50).describe("Max results to return"),
 });
 
 export type SearchFilesInput = z.infer<typeof SearchFilesSchema>;
@@ -21,8 +24,8 @@ export interface SearchMatch {
 export interface SearchFilesOutput {
   success: true;
   matches: SearchMatch[];
-  total: number;        // Updated for agent.ts
-  searchedFiles: number; // Updated for agent.ts
+  total: number;
+  searchedFiles: number;
   truncated: boolean;
   hints?: string[];
 }
@@ -36,17 +39,59 @@ export interface SearchFilesError {
 export type SearchFilesResult = SearchFilesOutput | SearchFilesError;
 
 const IGNORED_DIRS = new Set([
-  "node_modules", ".git", ".next", ".nuxt", "dist", "build", 
+  "node_modules", ".git", ".next", ".nuxt", "dist", "build",
   ".venv", "venv", "__pycache__", ".cache", ".idea", ".vscode",
   ".turbo", ".expo", "coverage"
 ]);
 
-const MAX_MATCHES = 50;
-const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit per file
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB per file
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+}
+
+function loadIgnore(root: string) {
+  const ig = ignore().add([...IGNORED_DIRS].map(d => `${d}/`));
+  try {
+    const gitignorePath = path.join(root, ".gitignore");
+    if (fs.existsSync(gitignorePath)) {
+      ig.add(fs.readFileSync(gitignorePath, "utf-8"));
+    }
+  } catch {
+    // ignore
+  }
+  return ig;
+}
+
+function matchesFilePattern(fileName: string, pattern?: string): boolean {
+  if (!pattern) return true;
+  const trimmed = pattern.trim();
+  if (!trimmed) return true;
+  // If pattern starts with . treat as extension
+  if (trimmed.startsWith(".")) {
+    return fileName.endsWith(trimmed) || path.extname(fileName) === trimmed;
+  }
+  // If pattern contains glob chars, simple includes fallback
+  if (trimmed.includes("*") || trimmed.includes("?")) {
+    // Convert simple glob to regex: * => .*, ? => .
+    const regexStr = "^" + escapeRegExp(trimmed).replace(/\\\*/g, ".*").replace(/\\\?/g, ".") + "$";
+    try {
+      return new RegExp(regexStr).test(fileName);
+    } catch {
+      return fileName.includes(trimmed);
+    }
+  }
+  // Otherwise substring include (case sensitive per file name)
+  return fileName.includes(trimmed);
+}
 
 export async function searchFiles(input: SearchFilesInput): Promise<SearchFilesResult> {
-  const resolvedDir = path.resolve(process.cwd(), input.directory);
-  
+  const safe = assertSafePath(input.directory);
+  if (safe.error) {
+    return { success: false, error: safe.error, hints: ["Search directory must be inside project root."] };
+  }
+  const resolvedDir = safe.resolved;
+
   if (!fs.existsSync(resolvedDir) || !fs.statSync(resolvedDir).isDirectory()) {
     return { success: false, error: `Directory not found: ${input.directory}` };
   }
@@ -54,24 +99,29 @@ export async function searchFiles(input: SearchFilesInput): Promise<SearchFilesR
   let regex: RegExp;
   try {
     const flags = input.caseSensitive ? "" : "i";
-    const pattern = input.isRegex ? input.query : input.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = input.isRegex ? input.query : escapeRegExp(input.query);
     regex = new RegExp(pattern, flags);
   } catch (e: any) {
     return {
       success: false,
       error: `Invalid regex pattern: ${e.message}`,
-      hints: ["Check your regex syntax or set 'isRegex' to false for literal text search."],
+      hints: ["Check regex syntax or set 'isRegex' to false for literal search."],
     };
   }
 
+  const ig = loadIgnore(process.cwd());
   const matches: SearchMatch[] = [];
   let total = 0;
-  let searchedFiles = 0; // Track files actually opened and read
+  let searchedFiles = 0;
   let truncated = false;
+  const maxMatches = input.maxResults ?? 50;
+  let skippedBinary = 0;
+  let skippedLarge = 0;
+  const visitedReal = new Set<string>();
 
   function walk(dir: string) {
-    if (truncated) return;
-    
+    if (truncated && matches.length >= maxMatches) return;
+
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -80,32 +130,62 @@ export async function searchFiles(input: SearchFilesInput): Promise<SearchFilesR
     }
 
     for (const entry of entries) {
-      if (truncated) return;
+      if (truncated && matches.length >= maxMatches) return;
+
       const fullPath = path.join(dir, entry.name);
-      
+      const relFromRoot = path.relative(process.cwd(), fullPath).split(path.sep).join("/");
+      const isOutsideRoot = relFromRoot.startsWith("..");
+
+      // Ignore check — skip .gitignore check for outside-root paths (e.g., /tmp tests) to avoid ignore library RangeError
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name)) walk(fullPath);
-      } else if (entry.isFile()) {
-        if (input.filePattern && !entry.name.endsWith(input.filePattern) && !entry.name.includes(input.filePattern)) {
+        if (IGNORED_DIRS.has(entry.name)) continue;
+        if (!isOutsideRoot && ig.ignores(relFromRoot + "/")) continue;
+
+        // Avoid symlink loops
+        try {
+          const lstat = fs.lstatSync(fullPath);
+          if (lstat.isSymbolicLink()) continue;
+          const real = fs.realpathSync(fullPath);
+          if (visitedReal.has(real)) continue;
+          visitedReal.add(real);
+        } catch {
           continue;
         }
-        
+
+        walk(fullPath);
+      } else if (entry.isFile()) {
+        if (!isOutsideRoot && ig.ignores(relFromRoot)) continue;
+        if (!matchesFilePattern(entry.name, input.filePattern)) continue;
+
         try {
-          const stats = fs.statSync(fullPath);
-          if (stats.size > MAX_FILE_SIZE) continue;
-          
+          const lstat = fs.lstatSync(fullPath);
+          if (lstat.isSymbolicLink()) continue;
+          if (lstat.size > MAX_FILE_SIZE) {
+            skippedLarge++;
+            continue;
+          }
+          // Quick binary check: read first 512 bytes for null byte
+          const fd = fs.openSync(fullPath, "r");
+          const buf = Buffer.alloc(512);
+          const bytes = fs.readSync(fd, buf, 0, 512, 0);
+          fs.closeSync(fd);
+          if (bytes > 0 && buf.subarray(0, bytes).includes(0)) {
+            skippedBinary++;
+            continue;
+          }
+
           const content = fs.readFileSync(fullPath, "utf-8");
-          searchedFiles++; // Increment successfully searched files
+          searchedFiles++;
           const lines = content.split("\n");
-          
+
           for (let i = 0; i < lines.length; i++) {
             if (regex.test(lines[i])) {
               total++;
-              if (matches.length < MAX_MATCHES) {
+              if (matches.length < maxMatches) {
                 matches.push({
-                  file: path.relative(process.cwd(), fullPath),
+                  file: relFromRoot,
                   line: i + 1,
-                  content: lines[i].trim(),
+                  content: lines[i].trim().slice(0, 300),
                 });
               } else {
                 truncated = true;
@@ -114,7 +194,7 @@ export async function searchFiles(input: SearchFilesInput): Promise<SearchFilesR
             }
           }
         } catch {
-          // Ignore binary or unreadable files
+          // ignore unreadable/binary
         }
       }
     }
@@ -124,10 +204,16 @@ export async function searchFiles(input: SearchFilesInput): Promise<SearchFilesR
 
   const hints: string[] = [];
   if (truncated) {
-    hints.push(`Search capped at ${MAX_MATCHES} matches to protect context window. Narrow your search using 'filePattern' or a more specific 'query'.`);
+    hints.push(`Search capped at ${maxMatches} matches to protect context. Narrow query or use filePattern.`);
   }
   if (total === 0) {
-    hints.push(`No matches found in ${searchedFiles} files. Check for typos, case sensitivity, or try a broader search term.`);
+    hints.push(`No matches found in ${searchedFiles} files. Check typos, caseSensitive, or broaden search.`);
+  }
+  if (skippedLarge > 0) {
+    hints.push(`${skippedLarge} large files (>1MB) skipped.`);
+  }
+  if (skippedBinary > 0) {
+    hints.push(`${skippedBinary} binary files skipped.`);
   }
 
   return {

@@ -1,7 +1,5 @@
 // src/core/agent.ts
 import { streamText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createGroq } from "@ai-sdk/groq";
 import * as path from "path";
 
 import { config } from "./config";
@@ -21,6 +19,7 @@ import {
   type NetworkEvent,
 } from "../errors/base";
 import { catchToolError } from "../errors/toolErrors";
+import { getProviderDefinition } from "../providers/registry";
 
 // ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -65,48 +64,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ━━━ Build Provider Model ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ Build Provider Model — now uses unified registry ───────────────────────
 
 function buildProviderModel(provider: ProviderName, model: string) {
-  switch (provider) {
-    case "openrouter": {
-      if (!config.openrouterApiKey) throw new Error("OPENROUTER_API_KEY is not set.");
-      const client = createOpenAI({
-        apiKey: config.openrouterApiKey,
-        baseURL: "https://openrouter.ai/api/v1",
-        headers: {
-          "HTTP-Referer": "https://github.com/cli-agent",
-          "X-Title": "CLI Agent",
-        },
-      });
-      return client(model);
-    }
-    case "groq": {
-      if (!config.groqApiKey) throw new Error("GROQ_API_KEY is not set.");
-      const client = createGroq({ apiKey: config.groqApiKey });
-      return client(model);
-    }
-    case "nvidia": {
-      if (!config.nvidiaApiKey) throw new Error("NVIDIA_API_KEY is not set.");
-      const client = createOpenAI({
-        apiKey: config.nvidiaApiKey,
-        baseURL: "https://integrate.api.nvidia.com/v1",
-      });
-      return client(model);
-    }
-    case "opencodezen": {
-      if (!config.opencodezenApiKey) throw new Error("OPENCODEZEN_API_KEY is not set.");
-      const client = createOpenAI({
-        apiKey: config.opencodezenApiKey,
-        baseURL: "https://opencode.ai/zen/v1",
-      });
-      return client(model);
-    }
-    default: {
-      const _e: never = provider;
-      throw new Error(`Unknown provider: ${_e}`);
-    }
+  const def = getProviderDefinition(provider);
+  const apiKey = def.getApiKey(config);
+  if (!apiKey) {
+    throw new Error(`${provider.toUpperCase()}_API_KEY is not set.`);
   }
+  return def.createModel(apiKey, model);
 }
 
 // ━━━ Tool Result Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -223,7 +189,6 @@ case "apply_patch": {
     return `Patch failed: ${fileList} (${failed.length})`;
   }
   
-  // Dry run or no patches
   const dryRun = patches?.find(p => p.status === "DRY_RUN");
   if (dryRun) {
     const fileList = dryRun.path ? path.basename(dryRun.path) : "unknown";
@@ -231,6 +196,30 @@ case "apply_patch": {
   }
   
   return "patch applied";
+}
+case "read_many_files": {
+  const results = r.results as Array<{ path: string; success: boolean }> | undefined;
+  const totalFiles = r.totalFiles as number | undefined;
+  const totalTokens = r.totalTokens as number | undefined;
+  if (results) {
+    const ok = results.filter(x => x.success).length;
+    return `${ok}/${results.length} files${totalTokens ? `, ~${totalTokens} tokens` : ""}`;
+  }
+  return totalFiles ? `${totalFiles} files` : "read many files";
+}
+case "git_status": {
+  const isClean = r.isClean as boolean | undefined;
+  const branch = r.branch as string | undefined;
+  if (branch) return isClean ? `${branch} clean` : `${branch} dirty`;
+  return isClean ? "clean" : "dirty";
+}
+case "git_diff": {
+  const isEmpty = r.isEmpty as boolean | undefined;
+  return isEmpty ? "no changes" : "diff generated";
+}
+case "git_log": {
+  const count = r.count as number | undefined;
+  return count != null ? `${count} commits` : "log";
 }
     default:
       return "done";
@@ -286,11 +275,17 @@ async function waitForRateLimit(
 async function waitForUserRetry(
   retrySignal: NonNullable<AgentOptions["retrySignal"]>
 ): Promise<void> {
-  // Poll every 200ms — cheap, no busy loop
-  while (!retrySignal.shouldRetry()) {
-    await sleep(200);
-  }
-  retrySignal.reset();
+  return new Promise<void>((resolve) => {
+    const check = () => {
+      if (retrySignal.shouldRetry()) {
+        retrySignal.reset();
+        resolve();
+      } else {
+        setTimeout(check, 300);
+      }
+    };
+    check();
+  });
 }
 
 // ━━━ Agent Loop ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
